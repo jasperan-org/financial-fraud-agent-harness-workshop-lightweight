@@ -48,7 +48,7 @@
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
-        "jupyter.notebookFileRoot": "${containerWorkspaceFolder}/workshop"
+        "jupyter.notebookFileRoot": "${containerWorkspaceFolder}"
       }
     }
   },
@@ -62,7 +62,13 @@
     "ORACLE_DEMO_USER": "FINANCE",
     "ORACLE_DEMO_PASS": "FinancePwd_2025",
     "OCI_GENAI_API_KEY": "${localEnv:OCI_GENAI_API_KEY}",
+    "OCI_GENAI_API_KEY_2": "${localEnv:OCI_GENAI_API_KEY_2}",
+    "OCI_GENAI_API_KEY_3": "${localEnv:OCI_GENAI_API_KEY_3}",
+    "OCI_GENAI_API_KEY_4": "${localEnv:OCI_GENAI_API_KEY_4}",
+    "OCI_GENAI_API_KEY_5": "${localEnv:OCI_GENAI_API_KEY_5}",
+    "OCI_GENAI_API_KEY_6": "${localEnv:OCI_GENAI_API_KEY_6}",
     "OCI_GENAI_ENDPOINT": "${localEnv:OCI_GENAI_ENDPOINT}",
+    "OCI_COMPARTMENT_ID": "${localEnv:OCI_COMPARTMENT_ID}",
     "TAVILY_API_KEY": "${localEnv:TAVILY_API_KEY}"
   }
 }
