@@ -42,7 +42,7 @@ You'll learn:
 - The starter-prompt **"expected: denied"** chips on the welcome mat let you click straight into a deny path so you can see the boundary in action.
 
 ![Welcome mat for the Analyst — East persona, with restriction tiles and tagged starter prompts](images/welcome-mat-persona.png)
-*Welcome mat shown on every fresh thread: the active persona's clearance, authorized regions, masked columns, and forbidden tables are visible at a glance. Starter prompts are tagged — `live news` cards fire `search_tavily`, `globe` cards drive the World Explorer, and the red `expected: denied` card is calibrated to hit this persona's authorization wall (here, `analyst.east` asking for AMERICAS transactions — the kernel will drop the rows). Switch persona from the header chip and the entire mat redraws.*
+*Welcome mat shown on every fresh thread: the active persona's clearance, authorized regions, masked columns, and forbidden tables are visible at a glance. Every starter card is verified to return real rows for that persona, so a first run never lands on an empty answer: `globe` cards drive the World Explorer, and the red `expected: denied` card is calibrated to hit this persona's authorization wall (here, `analyst.east` asking for AMERICAS transactions — the kernel will drop the rows). Switch persona from the header chip and the entire mat redraws.*
 
 ### 3. The Oracle AI Database 26ai primitive set, in one app
 
@@ -97,7 +97,7 @@ You'll learn:
 
 1. Search news → 2. Extract entities (countries, sectors, merchant categories, regions) → 3. Cross-reference via `run_sql` against FINANCE → 4. Summarize with both URL citations and data hits.
 
-Each result is also persisted into OAMP as `kind=web_search` memories so future turns can recover them via `search_knowledge` without re-querying. You'll see this fire on the **"Search the news for recent banking-fraud headlines…"** starter on the Analyst and CFO personas.
+Each result is also persisted into OAMP as `kind=web_search` memories so future turns can recover them via `search_knowledge` without re-querying. This tool is opt-in: it needs `TAVILY_API_KEY`, so it is deliberately absent from the welcome-mat starter cards — those are all answerable from your own data with no optional keys, and live headlines are non-deterministic enough to derail a timed demo. Ask for news in your own words once the key is set.
 
 ### 7. Chat-driven UI control: `focus_world`
 

@@ -1,4 +1,4 @@
-import { ShieldCheck, Sparkles, MapPin, EyeOff, Lock, Newspaper, Globe2, Ban } from "lucide-react";
+import { ShieldCheck, Sparkles, MapPin, EyeOff, Lock, Globe2, Ban } from "lucide-react";
 
 const CLEARANCE_BADGE = {
   EXECUTIVE: "bg-accent-tool/20 text-accent-tool border-accent-tool/40",
@@ -7,7 +7,7 @@ const CLEARANCE_BADGE = {
 
 // Starter prompts per persona. Each entry has:
 //   text     — the prompt the button sends as a chat message
-//   tag      — optional pill: 'news' | 'globe' | 'denied'
+//   tag      — optional pill: 'globe' | 'denied'
 //   denyHint — when tag === 'denied', a 1-line explanation of which boundary
 //              the question is expected to hit so the user understands the
 //              red badge means "this is supposed to fail for this persona".
@@ -15,17 +15,15 @@ const STARTERS = {
   agent: [
     { text: "Briefly summarize the FINANCE schema — what entities and how they relate." },
     { text: "How many transactions were flagged or blocked by the AML rules in the last 90 days, and for which reasons?" },
+    { text: "Give me the complete 360° view of account 7 — customer, branch, cards, and transactions — in one document." },
     { text: "Pull up the SAR narrative for customer 42 and summarize the investigation.",
       tag: "denied",
       denyHint: "SAR_REPORTS is compliance-only — this persona can't read it at all." },
-    { text: "Search the news for recent banking-fraud headlines and tell me which of our merchant categories they touch.",
-      tag: "news" },
   ],
   cfo: [
     { text: "What's the total transaction volume in USD over the last 90 days?" },
     { text: "Show me the top 5 branches by transaction count, with the average amount." },
-    { text: "Search the news for sanctions updates affecting cross-border payments.",
-      tag: "news" },
+    { text: "Compare all four regions side by side — volume, flagged counts, and the dominant AML typology in each." },
     { text: "Fly the globe to the Wall Street branch and tell me about its region.",
       tag: "globe" },
     { text: "Open AGENT.AGENT_AUTHORIZATIONS and list every persona's region access.",
@@ -35,10 +33,9 @@ const STARTERS = {
   "compliance.officer": [
     { text: "List the open SAR reports with their reason codes and customer risk ratings." },
     { text: "Which customers drive the most flagged transactions, and what patterns do they show?" },
-    { text: "Fly the globe to BitVault Exchange and show me flagged activity near it.",
+    { text: "Which AML rules actually generate SAR filings, and how often does each rule fire?" },
+    { text: "Fly the globe to BitVault Exchange and break down that merchant's flagged transactions by typology.",
       tag: "globe" },
-    { text: "Search the news for the latest AML regulatory fines.",
-      tag: "news" },
     { text: "Open AGENT.AGENT_AUTHORIZATIONS and list every persona's region access.",
       tag: "denied",
       denyHint: "even compliance can't open AGENT admin tables." },
@@ -46,8 +43,7 @@ const STARTERS = {
   "analyst.east": [
     { text: "Which branches in EUROPE or MIDDLE_EAST have the most flagged transactions?" },
     { text: "What's the transaction mix by channel for my region over the last 90 days?" },
-    { text: "Search the news for fraud trends in Europe affecting card payments.",
-      tag: "news" },
+    { text: "Which AML typology dominates my region, and how concentrated is it?" },
     { text: "Fly the globe to the EUROPE region and highlight flagged activity.",
       tag: "globe" },
     { text: "Show me the top AMERICAS transactions by amount — I want to compare against my region.",
@@ -57,9 +53,8 @@ const STARTERS = {
   "analyst.west": [
     { text: "Which merchants in AMERICAS or ASIA_PACIFIC attract the most flagged activity?" },
     { text: "List the casinos and crypto exchanges in my region." },
-    { text: "Search the news for crypto or card-fraud incidents affecting Asia-Pacific.",
-      tag: "news" },
-    { text: "Fly the globe to Marina Bay Sands and show nearby flagged transactions.",
+    { text: "Where are the RAPID_CASH_OUT cases concentrated, and which channel do they use?" },
+    { text: "Fly the globe to Marina Bay Sands and tell me how much flagged activity that casino has.",
       tag: "globe" },
     { text: "What's the total transaction value for EUROPE over the last 90 days?",
       tag: "denied",
@@ -68,9 +63,8 @@ const STARTERS = {
   "ops.viewer": [
     { text: "How many branches are in each region, and where are they?" },
     { text: "Which merchants have the most flagged transactions in the last 120 days?" },
-    { text: "Search the news for major banking outages or payment-rail incidents in the last 24h.",
-      tag: "news" },
-    { text: "Fly the globe to Dubai (DXB) and zoom in.",
+    { text: "Which branches carry the most flagged or blocked transactions, and through which channels?" },
+    { text: "Fly the globe to our Dubai branch and zoom in.",
       tag: "globe" },
     { text: "Show me the customer record for the account with the highest balance.",
       tag: "denied",
@@ -84,7 +78,6 @@ const FALLBACK_STARTERS = [
 ];
 
 const TAG_META = {
-  news:   { icon: Newspaper, label: "live news", cls: "bg-accent-skill/15 text-accent-skill border-accent-skill/30" },
   globe:  { icon: Globe2,    label: "globe",     cls: "bg-accent-memory/15 text-accent-memory border-accent-memory/30" },
   denied: { icon: Ban,       label: "expected: denied", cls: "bg-accent-sql/15 text-accent-sql border-accent-sql/40" },
 };
@@ -94,8 +87,8 @@ const TAG_META = {
  * acting persona (clearance / regions / masks / forbidden tables) and offers
  * starter-prompt buttons calibrated to what that persona can actually see.
  *
- * Each persona's starter list now includes:
- *   • A live-news question (search_tavily) tagged "news".
+ * Every card is calibrated to return real insight for a first-time user — no
+ * dead ends and no cards that depend on an optional API key:
  *   • A globe-driving question (focus_world) tagged "globe".
  *   • One question deliberately calibrated to FAIL for this persona's
  *     authorization rules — flagged with a red "expected: denied" chip so the
