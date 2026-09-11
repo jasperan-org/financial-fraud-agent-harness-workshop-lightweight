@@ -345,7 +345,7 @@ export default function WorldExplorer({ identityId, socket }) {
                 type="text"
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
-                placeholder="fly to — type a branch, merchant, customer, or region (e.g. Wall Street · BitVault Exchange · Emma Johnson · EUROPE)"
+                placeholder="fly to — type a branch, merchant, customer, or region (e.g. Wall Street · BitVault Exchange · Isabella Allen · EUROPE)"
                 className="flex-1 bg-transparent text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:outline-none"
               />
               <button
@@ -427,13 +427,16 @@ export default function WorldExplorer({ identityId, socket }) {
                 no geo features available — has the FINANCE seed run?
               </div>
             )}
+            {/* Earth textures are served from public/globe so the globe renders
+                offline and over plain http:// — protocol-relative unpkg.com URLs
+                resolve to http:// and die on unpkg's cross-origin https redirect. */}
             <Globe
               ref={globeRef}
               width={globeWidth}
               height={globeHeight}
               backgroundColor="#000308"
-              globeImageUrl="//unpkg.com/three-globe/example/img/earth-night.jpg"
-              bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
+              globeImageUrl="/globe/earth-night.jpg"
+              bumpImageUrl="/globe/earth-topology.png"
               showAtmosphere={true}
               atmosphereColor="#3b82f6"
               atmosphereAltitude={0.18}

@@ -28,7 +28,7 @@ The canonical workshop is the five-TODO path in `notebook_student.ipynb`. Each c
 
 Parts 4 (DBFS scratchpad), 5 (Oracle MLE), 9 (JSON Relational Duality Views), and 11 (tool-output offload) are **not** required TODOs in the 90-minute path. They remain as guides, and their code is live in the app and in the reference notebooks:
 
-- [`notebook_complete_with_setup_code.ipynb`](notebook_complete_with_setup_code.ipynb) — full source including every Oracle DDL statement.
-- [`enterprise_data_agent.ipynb`](enterprise_data_agent.ipynb) — the original end-to-end source notebook.
+- [`notebook_complete_with_setup_code.ipynb`](../notebook_complete_with_setup_code.ipynb) — full source including every Oracle DDL statement.
+- [`enterprise_data_agent.ipynb`](../enterprise_data_agent.ipynb) — the original end-to-end source notebook.
 
 Use them when you want to deploy this harness against an Oracle that isn't the workshop Codespace, or when you want the deeper chapters.

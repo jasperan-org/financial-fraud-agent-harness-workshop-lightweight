@@ -353,12 +353,15 @@ def _build_seed():
                          base_bal * 100, opened, "ACTIVE"))
         opened_dates.append((cid, opened))
     # A handful of extra accounts for SME/CORP customers (multiple accounts).
+    # NOTE: the loop above already used account_id 1..200 (``accounts.append((cid, cid, ...))``),
+    # so these must start at 201 — starting at 200 collides with the last
+    # generated account and trips the ACCOUNT_ID primary key on insert.
     for extra in range(50):
         cid = random.randint(1, 200)
         branch = random.choice(BRANCHES)
         acc_type = random.choice(ACCOUNT_TYPES)
         opened = now - _dt.timedelta(days=random.randint(60, 3650))
-        accounts.append((200 + extra, cid, branch[0], acc_type,
+        accounts.append((201 + extra, cid, branch[0], acc_type,
                          random.choice(CURRENCIES),
                          random.randint(15_000, 900_000) * 100, opened, "ACTIVE"))
     account_branch = {a[0]: a[2] for a in accounts}       # account_id -> branch_id
@@ -416,7 +419,8 @@ def _build_seed():
                 m = None
                 amount = random.randint(10_000, 5_000_000)
                 ttype = "DEPOSIT" if random.random() < 0.5 else "WITHDRAWAL"
-            add_txn(acc_id, m if m else None, when, amount, channel, ttype)
+            # m is a full MERCHANTS row; the transactions table stores merchant_id.
+            add_txn(acc_id, m[0] if m else None, when, amount, channel, ttype)
 
     # ---------- Fraud patterns (deliberately seeded AML signals) ------------
     # 1. STRUCTURING — several cash deposits just under the $10k CTR threshold

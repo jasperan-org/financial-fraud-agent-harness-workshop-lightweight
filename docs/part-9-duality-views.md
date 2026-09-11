@@ -8,7 +8,7 @@ Part 6 gave the agent a vector-indexed `toolbox` (dispatchable functions). Part 
 
 A duality view is a JSON projection over a set of tables joined by PK/FK/UK relationships. The same row in `accounts` is accessible as a **relational tuple** *and* as a **nested JSON document** that includes its `customer`, `branch`, and the arrays of `cards` and `transactions` (with their `merchant` nested inside). One read, no JOINs, no client-side reshaping.
 
-![JSON Relational Duality — three lenses, one source of truth](images/cover-duality-view.png)
+![JSON Relational Duality — three lenses, one source of truth](../images/cover-duality-view.png)
 
 ## Why this matters for an LLM agent specifically
 

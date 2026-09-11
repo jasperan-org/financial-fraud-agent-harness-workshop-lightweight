@@ -50,6 +50,9 @@ oracle-data/
 .tmp_*.json
 *.tmp
 
+# Planning notes — not for publication
+docs/15-min-fsi-session.md
+
 # Coverage / build
 coverage/
 *.cover
@@ -58,3 +61,7 @@ htmlcov/
 build/
 dist/
 *.egg
+
+# Local agent scratch — not part of the workshop
+.venv-verify/
+.ckg/

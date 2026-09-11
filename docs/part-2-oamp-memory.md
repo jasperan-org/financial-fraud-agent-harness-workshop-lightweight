@@ -54,7 +54,7 @@ We mine **four** sources:
 3. **Relational** — `ALL_CONSTRAINTS`, `ALL_CONS_COLUMNS`: PK/FK. *How tables relate.*
 4. **Workload** — `V$SQL`: a sample of recent queries. *How the database is actually used.*
 
-> **Why store scanned facts as *text* with embeddings, not as normalized rows?** Because the agent retrieves by *meaning*, not by primary key. When the user asks "which table records card transactions?" we want a cosine search over embedded descriptions to surface `FINANCE.CONTAINERS`, not a JOIN through four catalog views.
+> **Why store scanned facts as *text* with embeddings, not as normalized rows?** Because the agent retrieves by *meaning*, not by primary key. When the user asks "which table records card transactions?" we want a cosine search over embedded descriptions to surface `FINANCE.TRANSACTIONS`, not a JOIN through four catalog views.
 
 Each scanner helper takes `(conn, owner)` and returns a `list[Fact]`:
 
@@ -62,7 +62,7 @@ Each scanner helper takes `(conn, owner)` and returns a `list[Fact]`:
 @dataclass
 class Fact:
     kind: str        # "table" | "column" | "relationship" | "query_pattern"
-    subject: str     # e.g. "FINANCE.VESSELS"
+    subject: str     # e.g. "FINANCE.TRANSACTIONS"
     body: str        # natural-language sentence the embedder will read
     metadata: dict   # owner, table, column, etc.
 ```

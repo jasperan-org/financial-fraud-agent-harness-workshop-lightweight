@@ -55,7 +55,7 @@ Every TODO has a hard-stop assertion immediately below it. Use the [TODO checkli
 | 3 | Retrieval (vector + hybrid RRF) | [Part 3](docs/part-3-retrieval.md) | **TODO 2** — `retrieve_knowledge`<br>**TODO 3** — `hybrid_rrf_search_memories` |
 | 4 | DBFS scratchpad *(advanced reference)* | [Part 4](docs/part-4-dbfs.md) | — |
 | 5 | Oracle MLE compute sandbox *(advanced reference)* | [Part 5](docs/part-5-mle.md) | — |
-| 6 | Tools & skills (vector-indexed registries) | [Part 6](docs/part-6-tools-and-skills.md) | **TODO 4** — `tool_run_sql` |
+| 6 | Tools & skills (vector-indexed registries) | [Part 6](docs/part-6-tools-and-skills.md) | **TODO 4** — `tool_run_sql`<br>§6.5 `focus_world` globe tool *(no TODO)* |
 | 7 | The agent loop | [Part 7](docs/part-7-agent-loop.md) | **TODO 5** — `agent_turn` |
 | 9 | JSON Relational Duality Views *(advanced reference)* | [Part 9](docs/part-9-duality-views.md) | — |
 | 11 | Tool-output offload *(advanced reference)* | [Part 11](docs/part-11-tool-output-offload.md) | — |

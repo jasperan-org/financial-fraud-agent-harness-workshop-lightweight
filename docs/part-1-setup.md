@@ -28,9 +28,9 @@ In Codespaces, `.devcontainer/setup_runtime.sh` boots Oracle and runs the three 
 
 | Script | What it provisions |
 |---|---|
-| [`app/scripts/bootstrap.py`](app/scripts/bootstrap.py) | `AGENT` user, `vector_memory_size` / `pga_aggregate_limit`, the in-DB ONNX embedder, DBFS |
-| [`app/scripts/seed.py`](app/scripts/seed.py) | the `FINANCE` schema, the AML seed data, the duality views, the skillbox |
-| [`app/scripts/setup_advanced.py`](app/scripts/setup_advanced.py) | the Oracle Text index and the identity policies |
+| [`app/scripts/bootstrap.py`](../app/scripts/bootstrap.py) | `AGENT` user, `vector_memory_size` / `pga_aggregate_limit`, the in-DB ONNX embedder, DBFS |
+| [`app/scripts/seed.py`](../app/scripts/seed.py) | the `FINANCE` schema, the AML seed data, the duality views, the skillbox |
+| [`app/scripts/setup_advanced.py`](../app/scripts/setup_advanced.py) | the Oracle Text index and the identity policies |
 
 `.devcontainer/start_app.sh` then starts the Flask backend on port 8000 and the React UI on port 3000. Everything is idempotent and safe to re-run.
 
@@ -78,7 +78,7 @@ agent_conn = connect(AGENT_USER, AGENT_PASS, SYS_DSN)
 
 The `connect` helper retries because a Docker healthcheck can pass before Oracle's listener is ready to accept application sessions. After the connection succeeds, Part 2 creates the OAMP client and starts scanning `FINANCE` catalog metadata.
 
-If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, and `setup_advanced.py`, or open [`notebook_complete_with_setup_code.ipynb`](notebook_complete_with_setup_code.ipynb) — the full source that includes every DDL statement.
+If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, and `setup_advanced.py`, or open [`notebook_complete_with_setup_code.ipynb`](../notebook_complete_with_setup_code.ipynb) — the full source that includes every DDL statement.
 
 ## Verify the running app
 

@@ -15,7 +15,7 @@ If the registry has 6 tools, it's harmless to put them all in every LLM call. On
 
 We still always include a small **always-on** set — `run_sql`, `search_knowledge`, `remember`, `exec_js`, `load_skill` — they're cheap and the agent calls them on almost every turn.
 
-![Toolbox flow — registration vs per-turn retrieval](images/cover-toolbox-flow.png)
+![Toolbox flow — registration vs per-turn retrieval](../images/cover-toolbox-flow.png)
 
 ## The `@register` Decorator
 
@@ -135,7 +135,7 @@ Two procedural-memory tables, parallel structures:
 | Per-turn injection | Top-k schemas + always-on | Top-k *names + 1-line desc* (manifest) |
 | Full content | n/a (functions just run) | `load_skill(name)` returns the body |
 
-![Skillbox flow — manifest always-on, body on-demand](images/cover-skillbox-flow.png)
+![Skillbox flow — manifest always-on, body on-demand](../images/cover-skillbox-flow.png)
 
 **Source: [`oracle/skills/db`](https://github.com/oracle/skills/tree/main/db).** Oracle publishes a curated library — 100+ guides organized by category (`agent`, `performance`, `security`, `plsql`, `sqlcl`, …). Each `.md` file is a skill: an H1 title, a first-paragraph description, and a body of prose + SQL examples.
 
@@ -146,12 +146,32 @@ The pre-built ingestion cell mirrors them into `skillbox` with their content SHA
 
 The model sees the menu without paying for the meal.
 
+## The Globe Tool — `focus_world`
+
+Section 6.5 registers one more tool, worth calling out because it returns a **place** instead of rows.
+
+The app renders a World Explorer globe from `GET /api/world` in `app/backend/api/world_routes.py` — a dot per branch, a dot per merchant, and a red dot plus an arc per `FLAGGED` / `BLOCKED` transaction. `focus_world(target_kind, target, altitude)` lets the model move that camera:
+
+| `target_kind` | Resolves against | Example |
+|---|---|---|
+| `branch` | branch code, name, or city | `Wall Street`, `Dubai` |
+| `merchant` | merchant name or category | `BitVault Exchange` |
+| `customer` | full name, anchored at their oldest account's branch | `Isabella Allen` |
+| `region` | one of the four bank regions | `EUROPE` |
+
+**Why this belongs in Part 6.** Look at what the tool actually is: a `SELECT` that turns a name into a `(lat, lng)`, plus a payload shape. That's all. There is no spatial-reasoning layer and no separate geo service. The same `branches` and `merchants` rows the agent already queries for answers are the rows that position the map — one source of truth, two renderings. It is the cleanest demonstration in this workshop that a tool is *just a function plus a schema*, and that `@register` doesn't care whether the return value means "rows", "a document", or "a place".
+
+**Two implementations, one contract.** In the app the tool additionally emits a `focus_world` Socket.IO event that the React `WorldExplorer` listens for. The notebook version stops one line short of that and returns the anchor as JSON, because a notebook has no browser socket. Everything before the emit — validation, SQL, payload — is identical. When you read `app/backend/agent/tools.py`, look for the `payload = {...}` dict; the 6.5 cell builds exactly that.
+
+> **A customer resolves to a branch, not a location.** A bank knows where an account was *opened*, not where its holder is standing. `_resolve_world_target("customer", ...)` therefore anchors at the customer's primary (oldest) account's branch — an ordering that exists only in `accounts.opened_ts`. Useful domain logic belongs in the tool, not in the prompt.
+
 ## Key Takeaways — Part 6
 
 - **Tools are Python callables with embeddings.** The `@register` decorator introspects the function and writes a vector-indexed row. Function name + docstring + arg names *are* the public spec.
 - **Vector retrieval keeps the prompt lean.** With 30+ tools, including all of them every turn confuses the model. Top-k by cosine over the user query exposes only what's relevant — registry size grows without per-turn cost growing.
 - **Always-on vs retrieved.** Cheap-and-frequent tools (`run_sql`, `search_knowledge`, `remember`, `load_skill`) ship in every prompt. Specialised tools come from the toolbox lookup.
 - **Tools answer "what can I call?". Skills answer "what do I know how to do?".** Tools are dispatched as function calls; skills are prose playbooks the model reads.
+- **A tool can return anything.** `run_sql` returns rows, `get_document` returns a JSON document, `focus_world` returns a place. The registry treats all three identically — name, docstring, args, embedding.
 
 ## Troubleshooting
 
@@ -160,3 +180,5 @@ The model sees the menu without paying for the meal.
 **`@register` raises `ORA-51962`** — The HNSW vector index couldn't be created. Check `vector_memory_size` and bounce the DB if needed (see [Part 1](part-1-setup.md)).
 
 **`@register` succeeds but `retrieve_tools` returns empty results** — Run the cell that registers tools first. Without rows in `toolbox`, vector search has nothing to retrieve.
+
+**`focus_world` returns `no branch found matching ...`** — The resolver is deliberately literal: `branch_code` exact-matches, `name`/`city` match with `LIKE`. Use values that exist in the seed — `Wall Street`, `Dubai`, `BitVault Exchange`, `Isabella Allen`, `EUROPE`.

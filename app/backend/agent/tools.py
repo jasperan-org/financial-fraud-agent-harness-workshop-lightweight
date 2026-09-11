@@ -853,7 +853,7 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
 
         `target_kind` — one of: branch, merchant, customer, region.
         `target`      — the entity name / code / region label, e.g.
-                        'Wall Street', 'BitVault Exchange', 'Emma Johnson',
+                        'Wall Street', 'BitVault Exchange', 'Isabella Allen',
                         'EUROPE'.
         `altitude`    — globe camera altitude (1.0 = close, 2.5 = global view).
         """

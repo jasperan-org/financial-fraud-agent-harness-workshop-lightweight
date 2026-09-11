@@ -9,7 +9,7 @@ The front-end's WorldExplorer renders four layers:
                           the merchant, for flagged / blocked transactions)
 
 Plus a search endpoint that resolves "Wall Street", "BitVault Exchange",
-"Emma Johnson", "EUROPE" to a geographic anchor the front-end can fly the
+"Isabella Allen", "EUROPE" to a geographic anchor the front-end can fly the
 camera to.
 
 All queries respect the active identity (`as_user` query param) — if the user
@@ -71,6 +71,11 @@ def world():
 
         identity = get_identity(request.args.get("as_user"))
         region_clause, region_binds = _ident_region_filter(identity, alias="b")
+        # Same region filter, qualified for the merchants query below (alias `m`).
+        merchant_region_clause, _ = _ident_region_filter(identity, alias="m")
+        # ...and for the merchant-summary rollup, which only joins transactions
+        # + merchants and so must filter on the transaction's own region column.
+        txn_region_clause, _ = _ident_region_filter(identity, alias="t")
 
         branches = []
         merchants = []
@@ -111,7 +116,7 @@ def world():
                 f"SELECT merchant_id, name, mcc_code, category, country, region, "
                 f"       latitude, longitude "
                 f"  FROM {DEMO_USER}.merchants m "
-                f" WHERE 1=1 {region_clause} "
+                f" WHERE 1=1 {merchant_region_clause} "
                 f" ORDER BY merchant_id",
                 region_binds,
             )
@@ -130,27 +135,37 @@ def world():
                     "lng": float(lon),
                 })
 
-            # Suspicious activity — recent FLAGGED / BLOCKED transactions at
-            # their merchant's location, sized by amount_cents. Ops viewer
-            # sees these (no customer PII needed); analysts see only their
-            # regions' rows.
+            # Suspicious activity — recent FLAGGED / BLOCKED transactions,
+            # sized by amount_cents. Merchant-located rules (GEO_VELOCITY,
+            # HIGH_RISK_COUNTRY) plot at the merchant; the cash rules
+            # (STRUCTURING, RAPID_CASH_OUT, LARGE_CASH_DEPOSIT) carry no
+            # merchant_id, so they anchor at the account's home branch —
+            # otherwise three of the five AML rules never reach the globe.
+            # Ops viewer sees these (no customer PII needed); analysts see
+            # only their regions' rows, which is why the branches join is
+            # required (`region_clause` is qualified with `b.`).
             cur.execute(
                 f"SELECT t.txn_id, t.txn_ts, t.amount_cents, t.status, "
                 f"       t.flag_reason, t.channel, t.region, "
                 f"       m.merchant_id, m.name AS merchant_name, m.category, "
-                f"       m.latitude, m.longitude "
+                f"       m.latitude, m.longitude, "
+                f"       b.latitude AS b_lat, b.longitude AS b_lng "
                 f"  FROM {DEMO_USER}.transactions t "
+                f"  JOIN {DEMO_USER}.accounts a ON a.account_id = t.account_id "
+                f"  JOIN {DEMO_USER}.branches b ON b.branch_id = a.branch_id "
                 f"  LEFT JOIN {DEMO_USER}.merchants m ON m.merchant_id = t.merchant_id "
                 f" WHERE t.status IN ('FLAGGED', 'BLOCKED') "
-                f"   AND t.txn_ts >= SYSTIMESTAMP - INTERVAL '120' DAY "
+                f"   AND t.txn_ts >= SYSTIMESTAMP - INTERVAL '120' DAY(3) "
                 f" {region_clause} "
                 f" ORDER BY t.txn_id ",
                 region_binds,
             )
             for (tid, ts, amount, status, reason, channel, region,
-                 mid, mname, mcat, mlat, mlon) in cur:
-                # Fall back to the account's home branch when no merchant.
-                if mlat is None:
+                 mid, mname, mcat, mlat, mlon, blat, blng) in cur:
+                # Merchant location when the rule has one, else the branch.
+                lat = mlat if mlat is not None else blat
+                lng = mlon if mlon is not None else blng
+                if lat is None or lng is None:
                     continue
                 jitter = (int(tid) * 0.0173) % 0.06 - 0.03
                 suspicious.append({
@@ -165,8 +180,8 @@ def world():
                     "region": region,
                     "merchant": mname,
                     "merchant_category": mcat,
-                    "lat": float(mlat) + jitter,
-                    "lng": float(mlon) + jitter,
+                    "lat": float(lat) + jitter,
+                    "lng": float(lng) + jitter,
                 })
 
             # Activity arcs — home branch → merchant for flagged / blocked
@@ -182,9 +197,9 @@ def world():
                 f"  JOIN {DEMO_USER}.branches b ON b.branch_id = a.branch_id "
                 f"  LEFT JOIN {DEMO_USER}.merchants m ON m.merchant_id = t.merchant_id "
                 f" WHERE t.status IN ('FLAGGED', 'BLOCKED') "
-                f"   AND t.txn_ts >= SYSTIMESTAMP - INTERVAL '120' DAY "
+                f"   AND t.txn_ts >= SYSTIMESTAMP - INTERVAL '120' DAY(3) "
                 f"   AND m.latitude IS NOT NULL "
-                f" {region_clause.replace('b.', 'b.', 0)} "
+                f" {region_clause} "
                 f" ORDER BY t.txn_id",
                 region_binds,
             )
@@ -211,7 +226,7 @@ def world():
                 f"  FROM {DEMO_USER}.transactions t "
                 f"  JOIN {DEMO_USER}.merchants m ON m.merchant_id = t.merchant_id "
                 f" WHERE t.status IN ('FLAGGED', 'BLOCKED') "
-                f" {region_clause.replace('b.', 't.', 0)} "
+                f" {txn_region_clause} "
                 f" GROUP BY m.name ORDER BY 2 DESC",
                 region_binds,
             )
@@ -275,17 +290,22 @@ def search():
                 "lng": lng,
             })
 
-        # 1. Branch code (exact-ish) or name/city match.
+        # 1. Branch code (exact-ish) or name/city match. Region-filtered like
+        #    /api/world, otherwise a regional analyst could fly the camera to a
+        #    branch their persona is meant never to see. The OR group must stay
+        #    parenthesised so the region predicate applies to every disjunct.
+        branch_region_clause, branch_region_binds = _ident_region_filter(identity, alias="b")
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT branch_id, branch_code, name, city, country, region, "
                 f"       latitude, longitude "
-                f"  FROM {DEMO_USER}.branches "
-                f" WHERE LOWER(branch_code) = :exact OR LOWER(name) LIKE :needle "
-                f"    OR LOWER(city) LIKE :needle "
+                f"  FROM {DEMO_USER}.branches b "
+                f" WHERE (LOWER(branch_code) = :exact OR LOWER(name) LIKE :needle "
+                f"    OR LOWER(city) LIKE :needle) "
+                f" {branch_region_clause} "
                 f" ORDER BY CASE WHEN LOWER(branch_code) = :exact THEN 0 ELSE 1 END "
                 f" FETCH FIRST 1 ROWS ONLY",
-                exact=q.lower(), needle=needle,
+                exact=q.lower(), needle=needle, **branch_region_binds,
             )
             row = cur.fetchone()
             if row:
