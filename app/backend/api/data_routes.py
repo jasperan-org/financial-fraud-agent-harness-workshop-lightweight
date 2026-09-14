@@ -24,6 +24,7 @@ from api.identities import (
     region_filter_clause,
 )
 from config import AGENT_USER, DEMO_USER
+from db.deep_security import set_identity as set_db_identity
 
 
 data_bp = Blueprint("data", __name__)
@@ -277,6 +278,18 @@ def get_rows(schema: str, table: str):
         count_sql = f"SELECT COUNT(*) FROM {qualified}{where_sql}"
         sql = (f"SELECT {col_list} FROM {qualified}{where_sql} "
                "ORDER BY 1 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY")
+
+        # Push the persona into the database session *before* the reads. The
+        # kernel then applies the same rules the post-filters below apply, which
+        # is what makes this a trust boundary rather than a UI convenience.
+        # No-op when only the Python layer is installed.
+        try:
+            set_db_identity(conn, identity)
+        except Exception as exc:
+            traceback.print_exc()
+            print(f"[data] DB end-user context not set ({exc}); "
+                  "falling back to application-layer filtering only")
+
         rows: list[list[Any]] = []
         with conn.cursor() as cur:
             # The COUNT query doesn't use OFFSET/LIMIT; pass everything else.

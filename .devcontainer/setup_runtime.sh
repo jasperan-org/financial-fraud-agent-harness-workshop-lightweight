@@ -160,9 +160,16 @@ cd "$WORKSPACE"
 
 # --- 6. Run app/scripts/setup_advanced.py — Oracle Text index + DDS + scheduler ---
 echo ""
-echo "[6/6] Running app/scripts/setup_advanced.py (text index + DDS policies + scheduler)..."
+echo "[6/7] Running app/scripts/setup_advanced.py (text index + DDS policies + scheduler)..."
 cd "$WORKSPACE/app"
 python scripts/setup_advanced.py
+cd "$WORKSPACE"
+
+# --- 7. Identity-aware access: probe the DB, install the rule set (Part 8) ---
+echo ""
+echo "[7/7] Running app/scripts/setup_deep_security.py (identity rules at the kernel)..."
+cd "$WORKSPACE/app"
+python scripts/setup_deep_security.py
 cd "$WORKSPACE"
 
 echo ""

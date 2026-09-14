@@ -31,6 +31,7 @@ from config import (
     TAVILY_API_KEY,
 )
 from retrieval.scanner import Fact, run_scan, write_facts
+from db.deep_security import set_identity as set_db_identity
 
 
 # Module-level state — populated on first call to `init_tools()`.
@@ -450,6 +451,18 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
                         "forbid_tables": list(identity.forbid_tables),
                     },
                 })
+
+        # 2. Push the persona into the database session. From here the kernel
+        #    enforces rows, columns and denials itself; the post-fetch filters
+        #    below stay as defence in depth and become no-ops when the database
+        #    already answered correctly. Without this call the DBMS_RLS policies
+        #    evaluate against a NULL context and let everything through.
+        if identity is not None:
+            try:
+                set_db_identity(_AGENT_CONN, identity)
+            except Exception as e:
+                print(f"[tools] DB end-user context not set ({e}); "
+                      "falling back to application-layer filtering only")
 
         try:
             with _AGENT_CONN.cursor() as cur:

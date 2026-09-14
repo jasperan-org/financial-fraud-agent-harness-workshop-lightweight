@@ -36,8 +36,8 @@ The trust boundary follows the **end user**, not the database connection. Pick a
 
 You'll learn:
 
-- The same access-control shape DDS (Deep Data Security) ships at the kernel level in 26ai — declarative row policies, column masks, forbidden tables — but expressed in the application layer for a self-contained demo.
-- How to wire identity through *both* the data explorer (REST) and the chat agent (`tool_run_sql` post-fetch row-drop, column mask, forbid-table refusal) using a per-turn `threading.local`.
+- **The enforcement runs in the database, not in the view.** `db/deep_security.py` probes the instance and drives the strongest backend it has: Oracle **Deep Data Security** (`CREATE DATA GRANT`) on a 26ai Enterprise-class instance, or **`DBMS_RLS`** (VPD) row and column policies where it doesn't — which is the case on the 26ai **Free** image this demo ships on. `api/identities.py` is the single source of truth for both, and `scripts/setup_deep_security.py --ddl-only` emits the Deep Sec migration to `app/scripts/out/deep_sec_ddl.sql`.
+- How to wire identity through *both* the data explorer (REST) and the chat agent: every read calls `AGENT.set_eda_ctx` **before** it executes, so the kernel decides which rows and columns come back. The Python post-filters stay in place as defence in depth and become no-ops once the database has already answered correctly. A per-turn `threading.local` carries the end user.
 - How to make denials *useful*: when the agent hits a forbidden table, it tells the user the persona name, the missing privilege, and which higher-clearance persona would unblock the query. No generic "access denied" — every denial is grounded in a named role.
 - The starter-prompt **"expected: denied"** chips on the welcome mat let you click straight into a deny path so you can see the boundary in action.
 
@@ -61,7 +61,8 @@ The harness is deliberately built from primitives the database already ships, so
 | JSON Relational Duality Views | `account_dv` and `customer_dv` (created in `db/seed_finance.py`); agent reads via `tool_get_document` / `tool_query_documents` |
 | Oracle Spatial | `SDO_GEOMETRY` columns, `MDSYS.SPATIAL_INDEX_V2`, `SDO_WITHIN_DISTANCE`, SRID 8307 (WGS84) |
 | `DBMS_SCHEDULER` | scaffolded for periodic schema rescans |
-| `DBMS_RLS` / DDS pattern | mirrored in `api/identities.py` with Python-layer enforcement of the same rule shape |
+| `DBMS_RLS` + application context (VPD) | `db/deep_security.py` — capability probe, persona→policy projection, and the installer in `scripts/setup_deep_security.py` |
+| Deep Data Security (`CREATE DATA GRANT`) | same module, `deep_sec_ddl()` — generated for 26ai Enterprise-class, not executable on Free |
 
 You'll learn how each primitive composes with the others — e.g., a duality view's row filter inherits the underlying-table DDS policy automatically, so an `analyst.east` user reading `account_dv` for an `AMERICAS` account just gets nothing back.
 
@@ -238,6 +239,16 @@ Populates the demo data on top of the bootstrap:
 
 Re-runnable any time to refresh the demo dataset.
 
+## Identity rules (idempotent)
+
+```bash
+python scripts/setup_deep_security.py             # probe + install
+python scripts/setup_deep_security.py --demo      # + same-SQL/different-persona proof
+python scripts/setup_deep_security.py --ddl-only  # write the Deep Sec DDL, touch nothing
+```
+
+Probes the instance, seeds the persona rule tables, and installs the 15 `DBMS_RLS` policies on `FINANCE` — or writes the equivalent `CREATE DATA ROLE` / `CREATE END USER` / `CREATE DATA GRANT` DDL when Deep Data Security is available. Safe to re-run: it clears the policies it owns before reinstalling, so this script and the notebook's Part 8 supersede each other cleanly. Deep dive: [`docs/part-8-deep-data-security.md`](../docs/part-8-deep-data-security.md).
+
 ## Run
 
 Two terminals:
@@ -289,10 +300,12 @@ Drop these into the chat to exercise different parts of the harness:
 | *"Give me the complete document for account 7 — customer, branch, cards, transactions. Use the duality view if there is one."* | `get_document("account_dv", "7")` (JSON Relational Duality) |
 | *"Show me all transactions flagged as STRUCTURING in EUROPE."* | `query_documents("account_dv", where=...)` + DDS (amounts masked unless EXECUTIVE) |
 | *"How do I diagnose ORA-00904? Consult any guide you have."* | `load_skill("agent/ora-error-catalog")` from the skillbox |
+| *"List the Suspicious Activity Reports filed this quarter."* | identity gates at the kernel: 0 rows as `agent`, 15 as `compliance.officer` |
 
 ## Notes
 
-- The agent runs as `AGENT_USER` with whatever grants you've given it. `tool_run_sql` is read-only. The DDS / DBMS_RLS policies (set up by `setup_advanced.py`) still apply — set `EDA_CTX.END_USER` upstream of the agent if you want identity-aware filtering.
+- The agent runs as `AGENT_USER` with whatever grants you've given it. `tool_run_sql` is read-only. Identity is enforced by the database: `tool_run_sql` and the Data Explorer both call `AGENT.set_eda_ctx` before executing, so the `DBMS_RLS` policies installed by `scripts/setup_deep_security.py` scope every query. Set the persona in the header and the same SQL returns different rows — you never set `EDA_CTX.END_USER` yourself.
+- ⚠️ The VPD backend is **fail-open**: with no end-user context set, every policy predicate evaluates to `1=1` and all rows are visible. Deep Data Security (Enterprise-class 26ai) is **default-deny**. That gap is the honest caveat of this demo — see [`docs/part-8-deep-data-security.md`](../docs/part-8-deep-data-security.md).
 - The two JSON-relational duality views (`account_dv`, `customer_dv`) are read-only; the `get_document` and `query_documents` tools call them through `agent_conn` so the kernel-level row/column policies on the underlying tables apply transparently to the JSON output.
 - Spatial queries use SRID 8307 (WGS84). `branches.location` and `merchants.location` are both indexed (`MDSYS.SPATIAL_INDEX_V2`).
 - WebSocket transport only (Socket.IO `transports: ["websocket"]`); CORS is open during dev because Vite proxies `/api` and `/socket.io` to the backend.

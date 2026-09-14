@@ -87,6 +87,7 @@ if [ $BOOTSTRAP_OK -ne 0 ]; then
   python scripts/bootstrap.py 2>&1 | tee -a "$LOG_DIR/bootstrap.log"
   python scripts/seed.py 2>&1 | tee -a "$LOG_DIR/seed.log"
   python scripts/setup_advanced.py 2>&1 | tee -a "$LOG_DIR/setup_advanced.log"
+  python scripts/setup_deep_security.py 2>&1 | tee -a "$LOG_DIR/setup_deep_security.log"
   cd "$WORKSPACE"
 else
   echo "  AGENT user + ONNX embedder + toolbox table present."

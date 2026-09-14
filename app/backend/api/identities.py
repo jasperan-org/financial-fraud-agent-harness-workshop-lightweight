@@ -3,21 +3,33 @@
 The AGENT database user is always the actual session principal. Identities here
 are *application-layer personas* layered on top: each one carries a clearance
 level, a list of authorized regions (AMERICAS / EUROPE / MIDDLE_EAST /
-ASIA_PACIFIC), and a set of columns that should be masked when read. The Data
-Explorer applies these filters server-side; the agent loop receives the
-identity in its system prompt **and** in `tool_run_sql` so any SQL the model
-constructs is also gated.
+ASIA_PACIFIC), and a set of columns that should be masked when read.
 
-This is the same shape DDS (notebook §14.4 / Part 8) implements at the kernel
-level. The production app simulates it in Python rather than wiring full
-`CREATE DATA SECURITY POLICY` DDL — same trust contract, less moving parts for
-the demo.
+This module is the **single source of truth** for those rules. It is consumed
+by:
+
+  * `api/data_routes.py` and `agent/tools.py` — which push the persona into the
+    database session via `db/deep_security.py` before every read, so the kernel
+    enforces the rules, and keep the Python filters as defence in depth.
+  * `scripts/setup_deep_security.py` — which projects the same registry into
+    either Oracle Deep Data Security data grants (26ai Enterprise-class) or
+    `DBMS_RLS` policies driven by the `EDA_CTX` application context (26ai Free,
+    which is what the shipped Codespace runs).
+
+So there are two enforcement layers, and they cannot disagree: both are derived
+from the data below. See `docs/part-8-deep-data-security.md` and Part 8 of
+`enterprise_data_agent.ipynb`.
 
 Personas in this file are tuned so that *every* commonly-viewed table changes
 visibly when you switch identities. That makes the security model legible at a
 glance: pick `agent` and you see masks; pick `cfo` and they vanish; pick a
 regional analyst and rows drop too. Only `compliance.officer` can read the
 SAR_REPORTS table.
+
+NOTE: every entry in `mask_cols` must name a column that actually exists. A
+mask naming a nonexistent column is a silent no-op in Python and an ORA-23607
+the moment it reaches the database; this file previously shipped
+`FINANCE.ACCOUNTS.ACCOUNT_NUMBER`, which never existed.
 """
 
 from __future__ import annotations
@@ -55,7 +67,10 @@ _PII_CUSTOMER_MASKS = [
     "FINANCE.CUSTOMERS.SSN",
 ]
 _ACCOUNT_IDENTIFIER_MASKS = [
-    "FINANCE.ACCOUNTS.ACCOUNT_NUMBER",
+    # ACCOUNTS has no ACCOUNT_NUMBER column; the sensitive value that exists is
+    # the balance. Masking a column that does not exist is a silent no-op, so
+    # this list is kept honest — every entry must resolve to a real column.
+    "FINANCE.ACCOUNTS.BALANCE_CENTS",
     "FINANCE.CARDS.CARD_NUMBER",
 ]
 _FINANCIAL_VALUE_MASKS = [
@@ -81,10 +96,10 @@ IDENTITIES: dict[str, Identity] = {
         label="Analyst (default)",
         description=(
             "Default low-privilege application persona. Sees operational bank "
-            "data but customer SSNs, account/card identifiers, transaction "
-            "amounts, and SAR narratives are masked, and the SAR_REPORTS "
-            "table is out of reach. Use cfo for unrestricted financials, "
-            "or compliance.officer for SAR access."
+            "data but customer SSNs, account balances and card numbers, "
+            "transaction amounts, and SAR narratives are masked, and the "
+            "SAR_REPORTS table is out of reach. Use cfo for unrestricted "
+            "financials, or compliance.officer for SAR access."
         ),
         clearance="STANDARD",
         regions=None,
@@ -131,7 +146,7 @@ IDENTITIES: dict[str, Identity] = {
         description=(
             "Standard clearance, EUROPE + MIDDLE_EAST only. Transactions, "
             "accounts, cards, branches, merchants, and loans restricted to "
-            "those regions. Customer SSNs, account/card identifiers, "
+            "those regions. Customer SSNs, account balances and card numbers, "
             "transaction amounts, and SAR narratives are all masked."
         ),
         clearance="STANDARD",
@@ -168,9 +183,9 @@ IDENTITIES: dict[str, Identity] = {
         description=(
             "Read-only operations persona. Sees branch, merchant, and "
             "transaction traffic but customer records and SAR investigations "
-            "are off-limits entirely; account/card identifiers and transaction "
-            "amounts stay masked. Useful for dashboards that must never leak "
-            "customer PII."
+            "are off-limits entirely; account balances, card numbers and "
+            "transaction amounts stay masked. Useful for dashboards that must "
+            "never leak customer PII."
         ),
         clearance="STANDARD",
         regions=None,

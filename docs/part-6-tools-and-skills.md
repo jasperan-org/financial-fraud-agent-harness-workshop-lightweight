@@ -107,6 +107,8 @@ Notice three things:
 
 After this cell runs, `tool_run_sql` is in the `TOOLS` registry and a row in the `toolbox` table.
 
+> **Where identity enters.** `run_sql` is the one tool whose *results* depend on who is asking. [Part 8](part-8-deep-data-security.md) wires an end-user context into it (`AGENT.set_eda_ctx`) so the database — not this function — decides which rows and columns come back. You do not need to touch that wiring for the 90-minute path.
+
 ## The Toolset (Pre-Built)
 
 The notebook registers these tools beyond `tool_run_sql`:

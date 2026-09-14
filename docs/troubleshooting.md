@@ -247,6 +247,60 @@ See [Part 7 guide](part-7-agent-loop.md) for the exact pattern.
 
 ---
 
+## Identity and Deep Data Security
+
+### `ORA-00901: invalid CREATE command` when installing identity rules
+
+Expected on the workshop image, not a bug. `CREATE DATA ROLE`, `CREATE END USER`, and `CREATE DATA GRANT` are **Deep Data Security**, an Enterprise-class 26ai feature, and the Codespace runs **26ai Free**. `setup_deep_security.py` probes for this (`DBMS_DEEP_SEC` and the data-grant views) and installs the `DBMS_RLS` (VPD) backend instead — same rule set, same JSON output.
+
+See what your instance actually supports:
+
+```bash
+cd app && python scripts/setup_deep_security.py --ddl-only
+```
+
+The probe report at the top prints the backend it chose, and the Deep Sec DDL is written to `app/scripts/out/deep_sec_ddl.sql` without touching the database.
+
+### A persona still sees every region
+
+The VPD backend is **fail-open**: with no end-user context set, `SYS_CONTEXT('EDA_CTX','END_USER')` is `NULL` and every policy predicate evaluates to `1=1`.
+
+First check that the rules are installed:
+
+```bash
+cd app && python scripts/setup_deep_security.py --demo
+```
+
+If that table filters correctly but the app does not, the rule set is fine and the app is not driving it. Both read paths — `agent/tools.py::tool_run_sql` and `api/data_routes.py` — must set the context **before** executing. Confirm the policies exist:
+
+```sql
+SELECT object_name, policy_name FROM all_policies WHERE object_owner = 'FINANCE';
+```
+
+Fifteen policies is the canonical set.
+
+### `ORA-28113: policy predicate has error`
+
+A predicate is subquerying a table that carries a policy of its own. `FINANCE.branches` is policied, so a policy on `FINANCE.accounts` that reads `FINANCE.branches` fails at query time. That is why the scope predicate reads the precomputed `AGENT.agent_scope` table instead. Re-run `python scripts/setup_deep_security.py` to rebuild the rule tables and the predicates together.
+
+### `ORA-23607: invalid column` from a mask
+
+The mask registry names a column that does not exist. This is the failure mode Part 8 is built around: in Python a wrong column name is a silent no-op, while the kernel rejects it immediately. Check the persona masks in `api/identities.py` against the real schema.
+
+### `NameError: name 'CURRENT_END_USER' is not defined` in the notebook
+
+The reference notebook's `tool_run_sql` (Part 10) reads the handle Part 8 defines. Run the Part 8 cells before the tool cells, or regenerate the section:
+
+```bash
+python scripts/insert_part8_section.py
+```
+
+### Part 8 changes disappear after a rebuild
+
+Do not hand-edit the Part 8 cells. Edit `scripts/insert_part8_section.py` and regenerate — the generator is the source of truth for the section's code *and* for the Part 10 wiring, so a hand-applied fix to the notebook is silently reverted otherwise.
+
+---
+
 ## Checking System Status
 
 If something isn't working and you're not sure where, run this diagnostic cell:

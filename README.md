@@ -12,11 +12,11 @@
 
 This repository has two deliberately different learning surfaces:
 
-1. **The 90-minute notebook** — [`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives with **five hands-on TODOs**. Long-term memory via OAMP, hybrid vector + Oracle Text retrieval, a vector-indexed `toolbox` / `skillbox`, context engineering, and the bounded `agent_turn` loop. The answer key is [`notebook_complete.ipynb`](notebook_complete.ipynb).
+1. **The 90-minute notebook** — [`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives with **five hands-on TODOs**. Long-term memory via OAMP, hybrid vector + Oracle Text retrieval, a vector-indexed `toolbox` / `skillbox`, context engineering, and the bounded `agent_turn` loop. The answer key is [`notebook_complete.ipynb`](notebook_complete.ipynb); the reference notebook [`enterprise_data_agent.ipynb`](enterprise_data_agent.ipynb) goes further, with a **Part 8** on identity-aware data access.
 
 2. **The running app** — [`app/`](app/) is the **Meridian Bank AML app**: a Flask + Socket.IO backend and a React + Vite front end against the *same* Oracle, the *same* OAMP store, and the *same* `toolbox` / `skillbox` the notebook populates. Chat on the left; live memory pane on the right; an identity selector in the header; a 3D globe the agent can drive.
 
-Every "true setup" task — `AGENT` user creation, `vector_memory_size` / `pga_aggregate_limit`, the in-database ONNX embedder and reranker, the `FINANCE` seed, duality views, Oracle Text, identity policies — is run by the Codespace **before** you open the notebook (`app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`). Each TODO has a hard-stop assert below it so a broken implementation surfaces immediately.
+Every "true setup" task — `AGENT` user creation, `vector_memory_size` / `pga_aggregate_limit`, the in-database ONNX embedder and reranker, the `FINANCE` seed, duality views, Oracle Text, identity rules — is run by the Codespace **before** you open the notebook (`app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, `setup_deep_security.py`). Each TODO has a hard-stop assert below it so a broken implementation surfaces immediately.
 
 ![Financial Data Agent — Oracle-Native Architecture](images/cover-oracle-native-arch.png)
 
@@ -57,6 +57,7 @@ Every TODO has a hard-stop assertion immediately below it. Use the [TODO checkli
 | 5 | Oracle MLE compute sandbox *(advanced reference)* | [Part 5](docs/part-5-mle.md) | — |
 | 6 | Tools & skills (vector-indexed registries) | [Part 6](docs/part-6-tools-and-skills.md) | **TODO 4** — `tool_run_sql`<br>§6.5 `focus_world` globe tool *(no TODO)* |
 | 7 | The agent loop | [Part 7](docs/part-7-agent-loop.md) | **TODO 5** — `agent_turn` |
+| 8 | Identity-aware data access *(advanced reference)* | [Part 8](docs/part-8-deep-data-security.md) | — |
 | 9 | JSON Relational Duality Views *(advanced reference)* | [Part 9](docs/part-9-duality-views.md) | — |
 | 11 | Tool-output offload *(advanced reference)* | [Part 11](docs/part-11-tool-output-offload.md) | — |
 
@@ -110,7 +111,8 @@ cp app/.env.example app/.env        # OCI is the default — fill OCI_GENAI_API_
 cd app
 python scripts/bootstrap.py          # AGENT user, vector pool, ONNX embedder, DBFS
 python scripts/seed.py               # FINANCE schema + AML seed + duality views + skillbox
-python scripts/setup_advanced.py     # Oracle Text index + identity policies
+python scripts/setup_advanced.py     # Oracle Text index + scan scheduler
+python scripts/setup_deep_security.py # identity rules enforced in the database (Part 8)
 cd ..
 
 # 5. Front end
@@ -140,8 +142,9 @@ Open [http://localhost:3000](http://localhost:3000). Starter prompts that exerci
 | *"Give me the complete document for account 7 — customer, branch, cards, transactions."* | `get_document("account_dv", "7")` — JSON Relational Duality Views |
 | *"Show me all transactions flagged as STRUCTURING in EUROPE."* | `query_documents("account_dv", where=...)` |
 | *"How do I diagnose ORA-00904? Consult any guide you have."* | `load_skill(...)` from the skillbox |
+| *"Switch to compliance.officer and list the Suspicious Activity Reports."* | Identity rules enforced in the database (Part 8) — 15 rows instead of 0 |
 
-The right-hand pane fills in after every turn — top semantic memories, recent tool outputs, skill manifest, token usage. Switch the header persona (`agent`, `cfo`, `analyst.east`, `analyst.west`, `compliance.officer`) and the same SQL returns different rows.
+The right-hand pane fills in after every turn — top semantic memories, recent tool outputs, skill manifest, token usage. Switch the header persona (`agent`, `cfo`, `analyst.east`, `analyst.west`, `compliance.officer`) and the same SQL returns different rows: as `agent` the SAR reports query returns nothing, as `compliance.officer` it returns 15 rows, with no application-layer filtering on the path.
 
 For the full app documentation, see [`app/README.md`](app/README.md).
 
@@ -167,10 +170,13 @@ financial-fraud-agent-harness-workshop-lightweight/
 ├── app/                            Flask + React AML app
 │   ├── README.md                   Full app architecture
 │   ├── backend/                    Flask + Socket.IO + the harness
+│   │   └── db/deep_security.py     Identity probe + DBMS_RLS installer + Deep Sec DDL generator
 │   ├── frontend/                   React + Vite + Tailwind UI
-│   └── scripts/                    bootstrap.py, seed.py, setup_advanced.py
+│   └── scripts/                    bootstrap.py, seed.py, setup_advanced.py, setup_deep_security.py
 ├── images/                         Architecture diagrams + Codespaces screenshots
-├── scripts/build_student_notebook.py   Notebook integrity check
+├── scripts/
+│   ├── build_student_notebook.py   Notebook integrity check
+│   └── insert_part8_section.py     Regenerates notebook Part 8 (idempotent)
 └── requirements.txt                Notebook dependencies
 ```
 
@@ -183,6 +189,7 @@ financial-fraud-agent-harness-workshop-lightweight/
 - **In-database ONNX cross-encoder** (`RERANKER_ONNX`) via `PREDICTION()`.
 - **`openai` SDK** pointed at OCI GenAI's OpenAI-compatible endpoint (or OpenAI directly).
 - **App**: Flask + Socket.IO + eventlet (backend); React 18 + Vite + Tailwind + react-globe.gl (frontend).
+- **Identity at the kernel**: `DBMS_RLS` row/column policies plus an application context on this Free image — and the same persona registry emits `CREATE DATA GRANT` DDL for 26ai Enterprise-class **Deep Data Security**.
 
 ## What is "an agent" in this workshop?
 
