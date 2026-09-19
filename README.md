@@ -12,7 +12,7 @@
 
 This repository has two deliberately different learning surfaces:
 
-1. **The 90-minute notebook** — [`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives with **five hands-on TODOs**. Long-term memory via OAMP, hybrid vector + Oracle Text retrieval, a vector-indexed `toolbox` / `skillbox`, context engineering, and the bounded `agent_turn` loop. The answer key is [`notebook_complete.ipynb`](notebook_complete.ipynb); the reference notebook [`enterprise_data_agent.ipynb`](enterprise_data_agent.ipynb) goes further, with a **Part 8** on identity-aware data access.
+1. **The 90-minute notebook** — [`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives with **nine hands-on TODOs**. A bare-model baseline, the in-database embedder, memory scanning, semantic and hybrid retrieval, vector-indexed tool and skill lookup, a safe SQL tool, context engineering, and the bounded `agent_turn` loop. The answer key is [`notebook_complete.ipynb`](notebook_complete.ipynb); the reference notebook [`enterprise_data_agent.ipynb`](enterprise_data_agent.ipynb) goes further, with a **Part 8** on identity-aware data access.
 
 2. **The running app** — [`app/`](app/) is the **Meridian Bank AML app**: a Flask + Socket.IO backend and a React + Vite front end against the *same* Oracle, the *same* OAMP store, and the *same* `toolbox` / `skillbox` the notebook populates. Chat on the left; live memory pane on the right; an identity selector in the header; a 3D globe the agent can drive.
 
@@ -36,27 +36,27 @@ A slice of the transactions is deliberately suspicious, and `transactions.flag_r
 
 That flag column is the fraud use case: it turns "query the bank database" into a money-laundering investigation. See [`docs/fraud-detection-onepager.md`](docs/fraud-detection-onepager.md).
 
-## The five-TODO learning path
+## The nine-TODO learning path
 
 | Block | Topic | TODO |
 |---|---|---|
-| 1 | Setup, Oracle connectivity, and an OpenAI-compatible chat helper | — |
-| 2 | OAMP long-term memory and a `FINANCE` catalog scanner | **TODO 1** — `_scan_tables` |
-| 3 | Semantic, reranked, and hybrid vector + Oracle Text retrieval | **TODO 2** — `retrieve_knowledge`; **TODO 3** — `hybrid_rrf_search_memories` |
-| 4 | Vector-indexed toolbox and skillbox | **TODO 4** — `tool_run_sql` |
-| 5 | Context engineering and the bounded agent loop | **TODO 5** — `agent_turn` |
+| 1 | Setup, Oracle connectivity, and an OpenAI-compatible chat helper | **TODO 1** — ask the bare model a question |
+| 2 | OAMP long-term memory and a `FINANCE` catalog scanner | **TODO 2** — `OracleONNXEmbedder.embed`; **TODO 3** — `_scan_tables` |
+| 3 | Semantic, reranked, and hybrid vector + Oracle Text retrieval | **TODO 4** — `retrieve_knowledge`; **TODO 5** — `hybrid_rrf_search_memories` |
+| 4 | Vector-indexed toolbox and skillbox | **TODO 6** — `retrieve_tools`; **TODO 7** — `tool_run_sql`; **TODO 8** — `tool_list_skills` |
+| 5 | Context engineering and the bounded agent loop | **TODO 9** — `agent_turn` |
 
 Every TODO has a hard-stop assertion immediately below it. Use the [TODO checklist](docs/TODO-checklist.md) and the matching guides in [`docs/`](docs/) as you work:
 
 | Part | Topic | Guide | Coding TODO? |
 |---|---|---|---|
-| 1 | Setup & connectivity | [Part 1](docs/part-1-setup.md) | — |
-| 2 | Long-term memory with OAMP + scanner | [Part 2](docs/part-2-oamp-memory.md) | **TODO 1** — `_scan_tables` |
-| 3 | Retrieval (vector + hybrid RRF) | [Part 3](docs/part-3-retrieval.md) | **TODO 2** — `retrieve_knowledge`<br>**TODO 3** — `hybrid_rrf_search_memories` |
+| 1 | Setup & connectivity | [Part 1](docs/part-1-setup.md) | **TODO 1** — ask the bare model |
+| 2 | Long-term memory with OAMP + scanner | [Part 2](docs/part-2-oamp-memory.md) | **TODO 2** — `OracleONNXEmbedder.embed`<br>**TODO 3** — `_scan_tables` |
+| 3 | Retrieval (vector + hybrid RRF) | [Part 3](docs/part-3-retrieval.md) | **TODO 4** — `retrieve_knowledge`<br>**TODO 5** — `hybrid_rrf_search_memories` |
 | 4 | DBFS scratchpad *(advanced reference)* | [Part 4](docs/part-4-dbfs.md) | — |
 | 5 | Oracle MLE compute sandbox *(advanced reference)* | [Part 5](docs/part-5-mle.md) | — |
-| 6 | Tools & skills (vector-indexed registries) | [Part 6](docs/part-6-tools-and-skills.md) | **TODO 4** — `tool_run_sql`<br>§6.5 `focus_world` globe tool *(no TODO)* |
-| 7 | The agent loop | [Part 7](docs/part-7-agent-loop.md) | **TODO 5** — `agent_turn` |
+| 6 | Tools & skills (vector-indexed registries) | [Part 6](docs/part-6-tools-and-skills.md) | **TODO 6** — `retrieve_tools`<br>**TODO 7** — `tool_run_sql`<br>**TODO 8** — `tool_list_skills`<br>§6.5 `focus_world` globe tool *(no TODO)* |
+| 7 | The agent loop | [Part 7](docs/part-7-agent-loop.md) | **TODO 9** — `agent_turn` |
 | 8 | Identity-aware data access *(advanced reference)* | [Part 8](docs/part-8-deep-data-security.md) | — |
 | 9 | JSON Relational Duality Views *(advanced reference)* | [Part 9](docs/part-9-duality-views.md) | — |
 | 11 | Tool-output offload *(advanced reference)* | [Part 11](docs/part-11-tool-output-offload.md) | — |
@@ -69,7 +69,7 @@ Every TODO has a hard-stop assertion immediately below it. Use the [TODO checkli
 
    ![Codespace startup](images/codespace_startup.png)
 
-4. Add your `OCI_GENAI_API_KEY` as a Codespaces secret (or drop it into `app/.env`). The notebook falls back to key rotation and a prompt; the app reads `app/.env`.
+4. Add your `OCI_GENAI_API_KEY` as a Codespaces secret (or drop it into `app/.env`). The notebook rotates across `OCI_GENAI_API_KEY` + `OCI_GENAI_API_KEY_2..6` and prompts as a last resort; the app reads `app/.env`.
 5. Open [`notebook_student.ipynb`](notebook_student.ipynb) with the **Python 3.11** kernel and run cells from the top.
 
    ![Select Kernel](images/select_kernel.png)
@@ -158,8 +158,8 @@ financial-fraud-agent-harness-workshop-lightweight/
 │   ├── setup_build.sh              pip + npm installs
 │   ├── setup_runtime.sh            Oracle + bootstrap + seed + setup_advanced
 │   └── start_app.sh                Flask backend + Vite front end
-├── notebook_student.ipynb          The 90-minute path — five TODO stubs + asserts
-├── notebook_complete.ipynb         The five TODOs, solved
+├── notebook_student.ipynb          The 90-minute path — eight TODO stubs + TODO 1 prompt + asserts
+├── notebook_complete.ipynb         The nine TODOs, solved
 ├── notebook_complete_with_setup_code.ipynb   Full source including every Oracle DDL
 ├── enterprise_data_agent.ipynb     Original end-to-end source notebook
 ├── docs/
@@ -174,6 +174,7 @@ financial-fraud-agent-harness-workshop-lightweight/
 │   ├── frontend/                   React + Vite + Tailwind UI
 │   └── scripts/                    bootstrap.py, seed.py, setup_advanced.py, setup_deep_security.py
 ├── images/                         Architecture diagrams + Codespaces screenshots
+├── oci_key_rotation.py             Shared OCI key rotation for the notebook and app
 ├── scripts/
 │   ├── build_student_notebook.py   Notebook integrity check
 │   └── insert_part8_section.py     Regenerates notebook Part 8 (idempotent)

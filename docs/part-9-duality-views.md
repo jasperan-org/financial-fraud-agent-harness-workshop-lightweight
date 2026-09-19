@@ -3,7 +3,7 @@
 > **Documentation:** [`Creating Duality Views`](https://docs.oracle.com/en/database/oracle/oracle-database/26/jsnvu/creating-duality-views.html)
 
 
-> 🧭 **Advanced reference.** Duality views are not one of the five core TODOs in the 90-minute path. `account_dv` and `customer_dv` are seeded by `app/scripts/seed.py`, the running app exposes `get_document` / `query_documents`, and the reference notebooks implement them end to end. Read this when you want the deeper chapter.
+> 🧭 **Advanced reference.** Duality views are not one of the nine core TODOs in the 90-minute path. `account_dv` and `customer_dv` are seeded by `app/scripts/seed.py`, the running app exposes `get_document` / `query_documents`, and the reference notebooks implement them end to end. Read this when you want the deeper chapter.
 Part 6 gave the agent a vector-indexed `toolbox` (dispatchable functions). Part 7 layered the agent loop on top. **Part 9 adds a third procedural-memory shape: document-shaped reads of the relational schema** via Oracle 23ai/26ai's JSON Relational Duality Views.
 
 A duality view is a JSON projection over a set of tables joined by PK/FK/UK relationships. The same row in `accounts` is accessible as a **relational tuple** *and* as a **nested JSON document** that includes its `customer`, `branch`, and the arrays of `cards` and `transactions` (with their `merchant` nested inside). One read, no JOINs, no client-side reshaping.
@@ -33,7 +33,7 @@ One `SELECT JSON_SERIALIZE(data)` returns a fully nested document — customer, 
 
 Both are read-only — no `WITH UPDATE` clause, so DML through them is rejected by the kernel.
 
-## TODO 7: Register `tool_get_document`
+## Reference: Register `tool_get_document`
 
 Read one full document from a duality view by primary key. The agent calls this instead of writing JOINs whenever it needs the full shape of an entity.
 

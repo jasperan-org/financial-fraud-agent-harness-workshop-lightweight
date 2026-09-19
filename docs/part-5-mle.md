@@ -1,7 +1,7 @@
 # Part 5: Oracle MLE Compute Sandbox
 
 
-> 🧭 **Advanced reference.** Oracle MLE compute is not one of the five core TODOs in the 90-minute path. It is live in the running app (`exec_js`) and in the reference notebooks. Read this when you want the deeper chapter.
+> 🧭 **Advanced reference.** Oracle MLE compute is not one of the nine core TODOs in the 90-minute path. It is live in the running app (`exec_js`) and in the reference notebooks. Read this when you want the deeper chapter.
 LLMs are unreliable at math. Percentiles, weighted means, post-fetch reshaping — anything quantitative — should run in a deterministic engine, not in the model's head. We route those snippets through Oracle's **Multilingual Engine (MLE)** — JavaScript that runs *inside* the Oracle process, called via [`DBMS_MLE`](https://docs.oracle.com/en/database/oracle/oracle-database/26/dbmle/index.html).
 
 ## Why JavaScript and not Python?

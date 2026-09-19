@@ -34,7 +34,7 @@ The scanner picks both up via `COMMENT ON COLUMN`. Watch for them in §4's corre
 
 The seed cell is **pre-built** — you don't need to look at the DDL or the inserts to do the workshop. Read the `COMMENT ON TABLE` / `COMMENT ON COLUMN` block at the bottom of the seed cell if you want to see what a domain expert's mental model looks like in SQL.
 
-## TODO 2: Implement `retrieve_knowledge`
+## TODO 4: Implement `retrieve_knowledge`
 
 `retrieve_knowledge(query, k, kinds=None)` is a two-stage call that the agent loop will use on every turn:
 
@@ -94,7 +94,7 @@ After you implement it, the next cell scans `FINANCE` and runs a probe query —
 [column       ] FINANCE.TRANSACTIONS.AMOUNT_CENTS  Column FINANCE.TRANSACTIONS.AMOUNT_CENTS of type NUMBER (nullable). Meaning: Transaction amount in USD CENTS, never dollars.
 ```
 
-## TODO 3: Implement `hybrid_rrf_search_memories`
+## TODO 5: Implement `hybrid_rrf_search_memories`
 
 Pure vector search is strong on meaning but **under-weights exact tokens**. If the user types `AMOUNT_CENTS` or an `ORA-00904` error code, they want the row that *literally contains the string*, not one that's vaguely similar.
 
@@ -106,12 +106,18 @@ where $r_{\text{vec}}$ and $r_{\text{text}}$ are 1-based ranks from each retriev
 
 RRF doesn't care about absolute scores from each retriever — only the relative ranks — so it's robust to whatever scoring scheme each side uses.
 
-Two prerequisites — both already in this Oracle:
+Two prerequisites. The ONNX embedder lives in the database image, and the notebook creates the
+`CTXSYS.CONTEXT` index it needs in §3.3a (it is idempotent), so both are in place by the time this
+cell runs:
 
 | Side | What we use |
 |---|---|
 | Vector | `VECTOR_DISTANCE(c.embedding, VECTOR_EMBEDDING(...) USING :q AS DATA, COSINE)` over `eda_onnx_record_chunks.embedding` (HNSW-indexed) |
 | Full-text | `CONTAINS(m.content, :kw, 1) > 0` with `SCORE(1)` over a `CTXSYS.CONTEXT` index on `eda_onnx_memory.content` |
+
+The `:kw` bind is not the raw question: `CONTAINS` takes an Oracle Text *expression*, so the cell
+reuses `_text_query(query)` from §3.3, which joins the terms with `OR` (a plain sentence is parsed
+as a phrase and matches almost nothing).
 
 The fusion happens in **one SQL statement** — vector CTE, text CTE, FULL OUTER JOIN on memory id, RRF score computed inline, sort + fetch top-k. No round trip to Python.
 
@@ -162,7 +168,7 @@ def hybrid_rrf_search_memories(query, k=5, per_list=30, rrf_k=60):
          FETCH FIRST :k ROWS ONLY
     """
     with agent_conn.cursor() as cur:
-        kw = f'"{query}"' if " " in query.strip() else query
+        kw = _text_query(query)   # {term} OR {term} … (§3.3) — never the raw sentence
         cur.execute(sql, q=query, kw=kw, u=USER_ID, a=AGENT_ID,
                     n=per_list, rrf_k=rrf_k, k=k)
         rows = []
@@ -182,11 +188,11 @@ The hard-stop assert below your implementation runs the SQL against a real query
 
 ## The three-way retrieval probe (just run)
 
-Your `hybrid_rrf_search_memories(query, k)` (TODO 3) returns a list with each hit annotated by `r_vec`, `r_txt`, and `rrf_score`. Run the same query through:
+Your `hybrid_rrf_search_memories(query, k)` (TODO 5) returns a list with each hit annotated by `r_vec`, `r_txt`, and `rrf_score`. Run the same query through:
 
-- `retrieve_knowledge(probe_q, k=3)` — vector only (your TODO 2)
+- `retrieve_knowledge(probe_q, k=3)` — vector only (your TODO 4)
 - `keyword_search_memories(probe_q, k=3)` — Oracle Text only
-- `hybrid_rrf_search_memories(probe_q, k=3)` — fused via RRF (your TODO 3)
+- `hybrid_rrf_search_memories(probe_q, k=3)` — fused via RRF (your TODO 5)
 
 with this query:
 
@@ -205,15 +211,15 @@ print("=" * 80)
 
 print("\n--- A) VECTOR ONLY ---")
 for h in retrieve_knowledge(probe_q, k=3):
-    print(f"  [{h['"'"'kind'"'"']:12s}] {h['"'"'subject'"'"'][:40]:40s}  {h['"'"'body'"'"'][:100]}")
+    print(f"  [{h['kind']:12s}] {h['subject'][:40]:40s}  {h['body'][:100]}")
 
 print("\n--- B) KEYWORD ONLY ---")
 for h in keyword_search_memories(probe_q, k=3):
-    print(f"  [{h['"'"'kind'"'"']:12s}] score={h['"'"'score_txt'"'"']:6.2f}  {h['"'"'subject'"'"'][:40]:40s}")
+    print(f"  [{h['kind']:12s}] score={h['score_txt']:6.2f}  {h['subject'][:40]:40s}")
 
 print("\n--- C) HYBRID via RRF ---")
 for h in hybrid_rrf_search_memories(probe_q, k=3):
-    print(f"  rrf={h['"'"'rrf_score'"'"']:.4f}  r_vec={h['"'"'r_vec'"'"']:>3}  r_txt={h['"'"'r_txt'"'"']:>3}  {h['"'"'subject'"'"'][:40]}")
+    print(f"  rrf={h['rrf_score']:.4f}  r_vec={h['r_vec']:>3}  r_txt={h['r_txt']:>3}  {h['subject'][:40]}")
 ```
 
 Watch the `r_vec` / `r_txt` columns: a row whose `r_vec` is low (top of vector list) but `r_txt` is `999999` (missing from keyword list) still gets a fair RRF score from its vector half — and vice versa. Memories that show up in **both** lists get the highest combined score.
@@ -227,8 +233,14 @@ Watch the `r_vec` / `r_txt` columns: a row whose `r_vec` is low (top of vector l
 
 ## Troubleshooting
 
-**`AttributeError: '"'"'NoneType'"'"' object has no attribute '"'"'metadata'"'"'`** — `memory_client.search` returned no hits. Run the scan cell first to populate the store.
+**`AttributeError: 'NoneType' object has no attribute 'metadata'`** — `memory_client.search` returned no hits. Run the scan cell first to populate the store.
 
 **`ORA-29855: error occurred in the execution of ODCIINDEXCREATE`** — The `CTXSYS.CONTEXT` index needs the `CTXAPP` role. The setup cell grants it; if you're running outside the Codespace, `GRANT CTXAPP TO AGENT` as `SYSDBA`.
 
-**Hybrid query returns nothing** — Phrase-quote multi-word queries: `kw = f'"'"'"{query}"'"'"'` if the query has spaces. Otherwise Oracle Text parses it as a boolean expression and may match nothing.
+**Hybrid or keyword query returns nothing** — `CONTAINS()` takes an Oracle Text *expression*, and a plain
+multi-word string is parsed as a **phrase** — `amount_cents transaction amounts stored` means those
+words adjacent, in that order, so almost nothing matches (quoting it makes the phrase explicit,
+which is worse, not better). Join the terms with an operator instead: `{term} OR {term} …`, which is
+what the notebook's `_text_query()` (§3.3) does. If the leg is empty *after* that, the index is
+missing — `DRG-10599: column is not indexed` means the §3.3a cell has not run against this database
+yet.

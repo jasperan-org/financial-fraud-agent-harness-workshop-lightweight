@@ -177,7 +177,7 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 ```python
 with sys_conn.cursor() as cur:
-    cur.execute("SELECT COUNT(*) FROM all_tables WHERE owner = '"'"'FINANCE'"'"'")
+    cur.execute("SELECT COUNT(*) FROM all_tables WHERE owner = 'FINANCE'")
     print("table count:", cur.fetchone()[0])
 ```
 
@@ -311,7 +311,7 @@ import oracledb, os
 print("=== Environment ===")
 for k in ("OPENAI_API_KEY", "OCI_GENAI_API_KEY", "LLM_PROVIDER", "LLM_MODEL"):
     v = os.environ.get(k)
-    print(f"  {k}: {'"'"'SET'"'"' if v else '"'"'NOT SET'"'"'}")
+    print(f"  {k}: {'SET' if v else 'NOT SET'}")
 
 print("\n=== Oracle Connection ===")
 try:
@@ -322,7 +322,7 @@ try:
     print("  AGENT user:", cur.fetchone()[0])
     cur.execute("SELECT model_name FROM user_mining_models")
     print("  ONNX models:", [r[0] for r in cur])
-    cur.execute("SELECT COUNT(*) FROM all_tables WHERE owner = '"'"'FINANCE'"'"'")
+    cur.execute("SELECT COUNT(*) FROM all_tables WHERE owner = 'FINANCE'")
     print("  FINANCE tables:", cur.fetchone()[0])
     conn.close()
 except Exception as e:
@@ -334,7 +334,7 @@ try:
                             dsn="localhost:1521/FREEPDB1",
                             mode=oracledb.AUTH_MODE_SYSDBA)
     cur = conn.cursor()
-    cur.execute("SELECT value FROM v$parameter WHERE name = '"'"'vector_memory_size'"'"'")
+    cur.execute("SELECT value FROM v$parameter WHERE name = 'vector_memory_size'")
     val = int(cur.fetchone()[0] or 0)
     print(f"  vector_memory_size: {val // (1024**2)}M" if val > 0 else "  vector_memory_size: 0 (HNSW will fail)")
     conn.close()

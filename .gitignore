@@ -68,3 +68,10 @@ dist/
 # Local agent scratch — not part of the workshop
 .venv-verify/
 .ckg/
+
+# Secrets — never commit
+keys.txt
+
+# Agent-tooling artifacts (generated locally per agent session, not shared)
+AGENTS.md
+excalidraw.log

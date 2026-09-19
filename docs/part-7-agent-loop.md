@@ -33,7 +33,7 @@ The pre-built `SYSTEM_PROMPT` is the agent's job description. It tells the model
 
 These are the rules that turn a model into an *agent* — without them, GPT-class models often skip the JS hop, compute aggregates in their head, and confidently quote wrong numbers.
 
-## TODO 5: Implement `agent_turn`
+## TODO 9: Implement `agent_turn`
 
 This is the heart of the harness. Spend time on it — once you understand `agent_turn`, you understand the whole workshop.
 
@@ -179,7 +179,7 @@ print("\nUSER:", q2)
 print("ASSISTANT:", agent_turn(q2, thread_id=thread))
 
 q3 = ("Important: in the FINANCE schema, transactions.amount_cents is always USD CENTS, never dollars. "
-      "Save this as a '"'"'correction'"'"' memory by calling the remember tool BEFORE you respond, "
+      "Save this as a 'correction' memory by calling the remember tool BEFORE you respond, "
       "then confirm.")
 print("\nUSER:", q3)
 print("ASSISTANT:", agent_turn(q3, thread_id=thread))
@@ -196,7 +196,7 @@ After Turn 3, query the OAMP store and you'll see a new memory with `metadata.ki
 
 ## Troubleshooting
 
-**`openai.BadRequestError: 400 ... messages with role '"'"'tool'"'"' must be a response to a preceding message with '"'"'tool_calls'"'"'`** — You appended a tool result without first appending the assistant's `tool_calls` message. Always append the assistant message *first*, then the tool results, in order.
+**`openai.BadRequestError: 400 ... messages with role 'tool' must be a response to a preceding message with 'tool_calls'`** — You appended a tool result without first appending the assistant's `tool_calls` message. Always append the assistant message *first*, then the tool results, in order.
 
 **Loop never terminates** — Verify your `for step in range(max_iterations):` actually `break`s when `msg.tool_calls` is empty. A common bug is forgetting the `break` after setting `final`.
 

@@ -50,10 +50,10 @@ In Codespaces, `.devcontainer/setup_runtime.sh` boots Oracle and runs the three 
 
 The chat model is selected with `LLM_PROVIDER`:
 
-- `oci` (the workshop default) uses `OCI_GENAI_API_KEY` against OCI GenAI's OpenAI-compatible endpoint. This is the only outbound network call in the whole harness.
+- `oci` (the workshop default) uses `OCI_GENAI_API_KEY` (plus `OCI_GENAI_API_KEY_2..6`, which the shared `oci_key_rotation.py` helper rotates on rate limits) against OCI GenAI's OpenAI-compatible endpoint. This is the only outbound network call in the whole harness.
 - `openai` uses `OPENAI_API_KEY` instead.
 
-The app normalizes a bare OCI regional endpoint by appending `/openai/v1`; the notebook does the same when it initializes its client.
+The app normalizes a bare OCI regional endpoint by appending `/openai/v1`; the notebook does the same when it initializes its client, through the same shared helper.
 
 ## The two database parameters that matter
 
@@ -63,9 +63,9 @@ The app normalizes a bare OCI regional endpoint by appending `/openai/v1`; the n
 
 You don't need to remember the details — both are configured for you. They're explained here so you know what to look up if you hit these errors against a non-Codespaces database.
 
-## There is no TODO in Part 1
+## Connect in the notebook
 
-The Codespace already ran the provisioning scripts, so `AGENT`, the `FINANCE` schema, the vector pool, the ONNX models, the duality views, and the identity policies are all in place. The notebook just opens a session:
+Part 1 has one small TODO. Run the import and connection cells from the repository root:
 
 ```python
 SYS_DSN    = "localhost:1521/FREEPDB1"
@@ -79,6 +79,18 @@ agent_conn = connect(AGENT_USER, AGENT_PASS, SYS_DSN)
 The `connect` helper retries because a Docker healthcheck can pass before Oracle's listener is ready to accept application sessions. After the connection succeeds, Part 2 creates the OAMP client and starts scanning `FINANCE` catalog metadata.
 
 If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, and `setup_advanced.py`, or open [`notebook_complete_with_setup_code.ipynb`](../notebook_complete_with_setup_code.ipynb) — the full source that includes every DDL statement.
+
+## TODO 1: Talk to the bare model
+
+The chat-client cell ends with your first TODO: set `QUESTION`, run the cell, and read the answer. There is no harness here, no memory, no retrieval, no tools; it is the reasoning core on its own. Remember this baseline, because Part 7 wraps the same call in a context block, retrieved tool schemas, and a dispatch loop.
+
+**Solution:**
+
+```python
+QUESTION = "In one sentence: what does an AML 'structuring' pattern look like in transaction data?"
+```
+
+The checkpoint at the end of the cell fails until `QUESTION` is non-empty and the model answers. With OCI as the provider, the call goes through `call_with_failover`, so a rate-limited key is rotated before the cell raises.
 
 ## Verify the running app
 
