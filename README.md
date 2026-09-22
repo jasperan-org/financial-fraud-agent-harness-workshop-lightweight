@@ -57,7 +57,7 @@ Every TODO has a hard-stop assertion immediately below it. Use the [TODO checkli
 | 5 | Oracle MLE compute sandbox *(advanced reference)* | [Part 5](docs/part-5-mle.md) | — |
 | 6 | Tools & skills (vector-indexed registries) | [Part 6](docs/part-6-tools-and-skills.md) | **TODO 6** — `retrieve_tools`<br>**TODO 7** — `tool_run_sql`<br>**TODO 8** — `tool_list_skills`<br>§6.5 `focus_world` globe tool *(no TODO)* |
 | 7 | The agent loop | [Part 7](docs/part-7-agent-loop.md) | **TODO 9** — `agent_turn` |
-| 8 | Identity-aware data access *(advanced reference)* | [Part 8](docs/part-8-deep-data-security.md) | — |
+| 8 | Identity-aware data access — FINANCE + OAMP memory *(advanced reference)* | [Part 8](docs/part-8-deep-data-security.md) | — |
 | 9 | JSON Relational Duality Views *(advanced reference)* | [Part 9](docs/part-9-duality-views.md) | — |
 | 11 | Tool-output offload *(advanced reference)* | [Part 11](docs/part-11-tool-output-offload.md) | — |
 
@@ -184,13 +184,13 @@ financial-fraud-agent-harness-workshop-lightweight/
 ## Stack
 
 - **Oracle AI Database 26ai Free** via `gvenzl/oracle-free:23-faststart` (full image: Spatial + Text).
-- **`oracleagentmemory`** — Oracle AI Agent Memory Package (OAMP) owns the long-term memory schema.
+- **`oracleagentmemory`** (>= 26.8) — Oracle AI Agent Memory Package (OAMP) owns the long-term memory schema, including the Deep Data Security policies that can scope individual memories to an end user.
 - **`oracledb`** — the official Python Oracle driver.
 - **In-database ONNX embeddings** (`all-MiniLM-L12-v2`, 384-dim) via `DBMS_VECTOR.LOAD_ONNX_MODEL`. No hosted embedding API.
 - **In-database ONNX cross-encoder** (`RERANKER_ONNX`) via `PREDICTION()`.
 - **`openai` SDK** pointed at OCI GenAI's OpenAI-compatible endpoint (or OpenAI directly).
 - **App**: Flask + Socket.IO + eventlet (backend); React 18 + Vite + Tailwind + react-globe.gl (frontend).
-- **Identity at the kernel**: `DBMS_RLS` row/column policies plus an application context on this Free image — and the same persona registry emits `CREATE DATA GRANT` DDL for 26ai Enterprise-class **Deep Data Security**.
+- **Identity at the kernel**: `DBMS_RLS` row/column policies plus an application context on this Free image — and the same persona registry emits `CREATE DATA GRANT` DDL for 26ai Enterprise-class **Deep Data Security**. On a Deep Sec database the agent's *own* OAMP memory store goes under `UserOwnRows` + `GlobalMemories` policies too (OAMP >= 26.8), so memories are row-scoped in the kernel rather than by application filters.
 
 ## What is "an agent" in this workshop?
 

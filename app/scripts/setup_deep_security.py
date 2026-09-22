@@ -11,11 +11,17 @@ Run after `setup_advanced.py`. This script is the DB-layer companion to
 Backends (see `db/deep_security.py`):
 
     DEEP_SEC   a 26ai Enterprise-class database runs the real thing: data roles,
-               data grants, end users, application identity.
+               data grants, end users, application identity. On top of that,
+               oracleagentmemory >= 26.8 can place the agent's *own* memory
+               store under Deep Sec (UserOwnRows + GlobalMemories policies);
+               this script installs those policies too when the target and the
+               installed SDK support them.
     VPD        Oracle AI Database 26ai Free (the shipped Codespace) cannot — it
                has no DBMS_DEEP_SEC and rejects every Deep Sec DDL form with
                ORA-00901. Equivalant semantics are installed as DBMS_RLS
-               policies driven by the EDA_CTX application context.
+               policies driven by the EDA_CTX application context. The OAMP
+               memory-store policies need data roles/data grants, so on Free
+               they are reported and skipped, not faked.
 
 Either way the rule set comes from one place — `api/identities.py` — so the
 kernel and the application cannot drift apart.
@@ -92,6 +98,9 @@ def report_capability(conn) -> "object":
 
     ok, detail = latest_driver_supports_deep_sec()
     print(f"  [probe] client driver: {detail}")
+    print(f"  [probe] OAMP         : {cap.oamp_version}")
+    print("  [probe] OAMP memory DDS:",
+          "available" if cap.has_oamp_deepsec else "ABSENT")
     if cap.backend != "DEEP_SEC" and not ok:
         print("  [probe] note: Deep Sec also needs the 4.x client API; "
               "Free cannot run it regardless.")
@@ -546,6 +555,89 @@ def apply_deep_sec(conn, identities) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 3b. OAMP memory-store Deep Data Security (OAMP >= 26.8)
+# --------------------------------------------------------------------------- #
+
+
+def memory_store_settings() -> tuple[str, str]:
+    """(owner_schema, memory_store_id) for the harness's OAMP store.
+
+    Kept in lockstep with `memory/manager.py`, which builds the client with the
+    same store ID, so the policies protect the tables the agent actually uses.
+    """
+    from config import AGENT_USER
+    from memory.manager import MEMORY_STORE_ID
+
+    return AGENT_USER, MEMORY_STORE_ID
+
+
+def install_memory_enforcement(conn, identities, cap) -> None:
+    """Put the OAMP store under Deep Data Security when the database can do it.
+
+    On Free, the data roles and data grants Deep Sec is built from are absent,
+    so this reports the skip rather than pretending the memory layer is
+    protected; the runtime keeps its application-level thread scoping there.
+    """
+    from db.deep_security import (
+        install_memory_policies,
+        oamp_memory_deep_sec_available,
+    )
+
+    owner_schema, store_id = memory_store_settings()
+    if not cap.supports_deep_sec:
+        print(f"  [memory] skipped {owner_schema}.{store_id}: backend="
+              f"{cap.backend} has no data roles/data grants (OAMP memory "
+              "policies require Deep Sec).")
+        return
+    ok, detail = oamp_memory_deep_sec_available()
+    if not ok:
+        print(f"  [memory] skipped {owner_schema}.{store_id}: {detail}")
+        return
+
+    report = install_memory_policies(
+        conn, identities, owner_schema=owner_schema, memory_store_id=store_id
+    )
+    print(f"  [memory] {report.store}: {len(report.installed)} policy/policies "
+          f"({', '.join(report.installed)})")
+    names = ", ".join(name for name, _ in report.assignments[:3])
+    suffix = " ..." if report.granted_principals > 3 else ""
+    print(f"  [memory] granted to {report.granted_principals} end user(s): "
+          f"{names}{suffix}")
+    print("  [memory] runtime: wrap OAMP calls in "
+          "db.deep_security.memory_end_user_context(ctx)")
+
+
+def report_memory_policies(conn, cap) -> None:
+    """Show the memory-store policy state on a Deep Sec database."""
+    from db.deep_security import (
+        list_memory_policies,
+        oamp_memory_deep_sec_available,
+    )
+
+    owner_schema, store_id = memory_store_settings()
+    print("\n  -- agent memory store (OAMP >= 26.8 Deep Data Security)")
+    if not cap.supports_deep_sec:
+        print(f"  not enforceable on backend={cap.backend}: no data roles/"
+              "data grants for the memory tables.")
+        return
+    ok, detail = oamp_memory_deep_sec_available()
+    if not ok:
+        print(f"  not available: {detail}")
+        return
+    report = list_memory_policies(
+        conn, owner_schema=owner_schema, memory_store_id=store_id
+    )
+    print(f"  store      : {report.store}")
+    print(f"  policies   : {', '.join(report.installed) or '(none installed)'}")
+    if not report.assignments:
+        print("  principals : (no grants)")
+    for name, policies in report.assignments:
+        print(f"  principal  : {name:<46} {', '.join(policies)}")
+    print("  Runtime identity comes from OracleMemoryEndUserSecurityContext, "
+          "not a session variable.")
+
+
+# --------------------------------------------------------------------------- #
 # 4. Proof
 # --------------------------------------------------------------------------- #
 
@@ -619,6 +711,7 @@ def main() -> int:
     from api.identities import IDENTITIES
 
     args = set(sys.argv[1:])
+    ddl_only = bool({"ddl-only", "--ddl-only"} & args)
     print("\n=== Deep Data Security: probe, install, prove ===\n")
 
     sys_conn = connect_sys()
@@ -627,9 +720,15 @@ def main() -> int:
     print("[1/4] What can this database enforce?")
     cap = report_capability(agent_conn)
 
-    if "ddl-only" in args:
+    if ddl_only:
         print("\n[--ddl-only] writing Deep Sec DDL and exiting")
         write_deep_sec_ddl(agent_conn, IDENTITIES)
+        print("  [memory] OAMP >= 26.8 manages the memory-store policies itself;"
+              " run")
+        print("           this script on the target (or call"
+              " install_memory_policies())")
+        print("           after the DDL is applied \u2014 do not hand-write those"
+              " grants.")
         return 0
 
     print("\n[2/4] Loading the policy tables from api/identities.py...")
@@ -651,12 +750,14 @@ def main() -> int:
             print("  [deep_sec] NOT executed: this database has no Deep Sec. "
                   f"Run {DDL_FILE.name} on a 26ai Enterprise-class instance to "
                   "replace the VPD backend with data grants.")
+        install_memory_enforcement(sys_conn, IDENTITIES, cap)
     finally:
         demo_conn.close()
 
     if "--demo" in args:
         print("\n[4/4] Proof: the database answers per persona")
         demo(agent_conn, IDENTITIES)
+        report_memory_policies(sys_conn, cap)
     else:
         print("\n[4/4] Skipped proof (pass --demo to run it)")
 

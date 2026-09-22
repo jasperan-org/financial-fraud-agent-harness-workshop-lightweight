@@ -19,6 +19,7 @@ from agent.skills import build_skill_manifest
 from agent.system_prompt import SYSTEM_PROMPT
 from config import AGENT_ID, ONNX_EMBED_MODEL, USER_ID
 from db.dbfs import DBFS
+from memory.manager import memory_links
 
 
 def _safe(callable_, default, *, label: str = ""):
@@ -196,6 +197,7 @@ def _episodic_memories(memory_client, query: str, thread_id: str | None = None, 
         user_id=USER_ID,
         agent_id=AGENT_ID,
         max_results=k * 4,
+        include_invalid_results=False,
     )
     items = []
     for r in raw or []:
@@ -257,6 +259,7 @@ def _top_memories(memory_client, query: str, thread_id: str | None = None, k: in
         user_id=USER_ID,
         agent_id=AGENT_ID,
         max_results=k * 3,
+        include_invalid_results=False,
     )
     items = []
     for r in raw or []:
@@ -283,6 +286,7 @@ def _top_memories(memory_client, query: str, thread_id: str | None = None, k: in
             "body": str(body)[:500],
             "origin_thread_id": origin,
             "scope": scope,
+            "links": memory_links(memory_client, getattr(rec, "id", ""), limit=3),
         })
         if len(items) >= k:
             break
@@ -363,7 +367,7 @@ def list_threads(memory_client, limit: int = 50, agent_conn=None) -> list[dict]:
     OAMP's `_store.list("thread", ...)` raises `ValueError: Unsupported DB
     record_type` — its `_resolve_record_table` only handles `message` and
     memory-table types. Threads have to be queried directly against the OAMP
-    thread table (`{table_name_prefix}thread`, lowercase, singular).
+    thread table (`{memory_store_id}_thread`, lowercase, singular).
     """
     if agent_conn is None:
         # Fall back to the OAMP connection if no explicit agent_conn was passed.
@@ -372,7 +376,7 @@ def list_threads(memory_client, limit: int = 50, agent_conn=None) -> list[dict]:
         print("[context] list_threads: no connection available")
         return []
 
-    table_name = "eda_onnx_thread"  # matches table_name_prefix='eda_onnx_' in memory/manager.py
+    table_name = "eda_onnx_thread"  # matches memory_store_id='EDA_ONNX' in memory/manager.py
     try:
         with agent_conn.cursor() as cur:
             cur.execute(

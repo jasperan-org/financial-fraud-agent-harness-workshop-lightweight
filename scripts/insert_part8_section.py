@@ -522,7 +522,86 @@ print("'NULL' = the row came back, the value did not. A mask, not an absence.")
 print("SAR reports are 0 for everyone except compliance.officer (default-deny).")
 '''
 
-CODE_WIRE = r'''# ---- 8.7  The handle the agent loop must not forget -------------------------
+MD_MEMORY = r"""### 8.7 The agent's memory is data too
+
+Everything the agent has learned — tool outputs, scanned schema facts, extracted preferences,
+episodic turns — lives in the OAMP-managed `EDA_ONNX_*` tables in the `AGENT` schema. Until OAMP
+26.8 that store was protected only by application-level thread and user scoping: any holder of the
+connection could `SELECT * FROM agent.eda_onnx_memory` and read every user's memories.
+
+`oracleagentmemory` 26.8 puts the memory store under the same database-native model as `FINANCE`,
+with four surfaces:
+
+- **`UserOwnRowsDeepDataSecurityPolicy`** — row-scoped `SELECT`, column-scoped `INSERT`/`UPDATE`,
+  row-scoped `DELETE` on the end user's own memory rows.
+- **`GlobalMemoriesDeepDataSecurityPolicy`** — read access to unscoped (`user_id IS NULL`)
+  memories plus links between visible memories.
+- **Admin API** — `add_deep_data_security_policies`, `grant_agent_memory_policies`, `list_*`,
+  `remove_*`, `revoke_*` create the data roles/grants for one store and assign them to local end
+  users or OCI IAM groups. A `LocalEndUserPrincipal` must be an unquoted Oracle identifier
+  (`ANALYST_EAST`, not `analyst.east@meridianbank.example`); UPN/IAM deployments grant to an
+  `OciGroupPrincipal` instead. The policy internals stay private to the SDK, so use the API, not
+  hand-written DDL.
+- **`OracleMemoryEndUserSecurityContext`** — the runtime context manager: it attaches the end user
+  to every OAMP operation, verifies the identity on the acquired connection, and clears it before
+  release. Background extraction jobs keep a private snapshot so they can finish after the block.
+
+The cell below installs the two policies for this notebook's store and degrades honestly on the
+Free edition, where the data roles and data grants they compile to do not exist.
+"""
+
+CODE_MEMORY = r'''# ---- 8.7  Agent memory is data too: OAMP >= 26.8 Deep Data Security ---------
+# Same kernel boundary as FINANCE, applied to the store the agent learns into.
+# Install through the OAMP SDK: the policy internals (managed tables, roles,
+# grants, SQL) are private and may change between releases.
+
+import oracleagentmemory
+
+try:
+    from oracleagentmemory.core import deepsec as oamp_deepsec
+    print(f"OAMP {oracleagentmemory.__version__}: core.deepsec present")
+except ImportError:
+    oamp_deepsec = None
+    print(f"OAMP {oracleagentmemory.__version__}: no core.deepsec — memory "
+          "Deep Data Security needs >= 26.8")
+
+MEMORY_STORE_ID = "EDA_ONNX"        # the managed tables the app and notebook use
+
+
+def local_end_user(pid: str) -> str:
+    """`analyst.east` -> `ANALYST_EAST`. LocalEndUserPrincipal requires an
+    unquoted Oracle identifier — no dots, no '@'. OCI IAM deployments would
+    use OciGroupPrincipal('<group>') instead."""
+    return pid.replace(".", "_").upper()
+
+
+if oamp_deepsec is None:
+    print("upgrade with: pip install -U 'oracleagentmemory>=26.8'")
+else:
+    policies = [oamp_deepsec.UserOwnRowsDeepDataSecurityPolicy(),
+                oamp_deepsec.GlobalMemoriesDeepDataSecurityPolicy()]
+    print("policy set:", [type(p).__name__ for p in policies])
+    try:
+        oamp_deepsec.add_deep_data_security_policies(
+            sys_conn, owner_schema="AGENT",
+            memory_store_id=MEMORY_STORE_ID, policies=policies)
+        for pid in PERSONAS:
+            oamp_deepsec.grant_agent_memory_policies(
+                sys_conn, memory_store_id=MEMORY_STORE_ID, owner_schema="AGENT",
+                principals=[oamp_deepsec.LocalEndUserPrincipal(local_end_user(pid))],
+                policies=policies)
+        installed = oamp_deepsec.list_deep_data_security_policies(
+            sys_conn, owner_schema="AGENT", memory_store_id=MEMORY_STORE_ID)
+        print("installed:", [type(p).__name__ for p in installed])
+        print("runtime  : wrap memory calls in "
+              "OracleMemoryEndUserSecurityContext(ctx)")
+    except Exception as e:
+        print(f"not enforceable here: {type(e).__name__}: {str(e)[:140]}")
+        print("26ai Free has no data roles/data grants (ORA-00901); run this cell "
+              "on a 26ai Enterprise-class database.")
+'''
+
+CODE_WIRE = r'''# ---- 8.8  The handle the agent loop must not forget -------------------------
 # Part 10's `tool_run_sql` sets the end-user context on every call, from this
 # handle. One process-wide slot is enough for the notebook; the production app
 # (app/backend/agent/tools.py) uses a thread/greenlet-local so two concurrent
@@ -575,8 +654,8 @@ database derives `NULL` columns from the grant itself rather than from a mask fu
 
 ```sql
 CREATE DATA ROLE eda_analyst_east_role;
-CREATE END USER "analyst.east@meridianbank.example" IDENTIFIED BY "...";
-GRANT DATA ROLE eda_analyst_east_role TO "analyst.east@meridianbank.example";
+CREATE END USER analyst_east IDENTIFIED BY "...";
+GRANT DATA ROLE eda_analyst_east_role TO analyst_east;
 
 -- rows: EU + ME only
 CREATE OR REPLACE DATA GRANT eda_analyst_east_transactions AS
@@ -591,11 +670,15 @@ CREATE OR REPLACE DATA GRANT eda_analyst_east_customers AS
     TO eda_analyst_east_role;
 ```
 
+Local end users are unquoted DB identifiers; a UPN belongs in the external-authenticator clause
+(`AND FACTOR 'oma_push' AS 'analyst.east@meridianbank.example'`), and OCI IAM deployments grant the
+memory-store policies to `OciGroupPrincipal`s rather than local end users.
+
 The application then stops passing strings around and starts attaching an identity:
 
 ```python
 ctx = oracledb.create_end_user_security_context(
-    end_user_identity=("ANALYST.EAST@MERIDIANBANK.EXAMPLE", key),
+    end_user_identity=("ANALYST_EAST", key),
     database_access_token=token,                 # OBO or client-credentials
     data_roles=["EDA_ANALYST_EAST_ROLE"],
 )
@@ -633,8 +716,10 @@ Data Explorer and the kernel cannot drift apart.
 > - **Free can still demonstrate the semantics** with an application context plus
 >   `DBMS_RLS`, as long as you know it is fail-open without a context and that a
 >   predicate may not subquery another policied table.
-> - **Put the context on every read path.** The last two cells do that for `run_sql`;
+> - **Put the context on every read path.** The cells above do that for `run_sql`;
 >   forgetting it is how a kernel-enforced system silently reverts to an open one.
+> - **The agent's memory is data too.** OAMP >= 26.8 puts its own store under the same
+>   data-grant model (8.7); on Free the installer reports the skip instead of faking it.
 """
 
 
@@ -678,6 +763,8 @@ def main():
         cell("code", CODE_INSTALL, "p8-install"),
         cell("code", CODE_POLICIES, "p8-policies"),
         cell("code", CODE_DEMO, "p8-demo"),
+        cell("markdown", MD_MEMORY, "p8-memory-md"),
+        cell("code", CODE_MEMORY, "p8-memory"),
         cell("code", CODE_WIRE, "p8-wire"),
         cell("markdown", MD_TARGET, "p8-target"),
     ]

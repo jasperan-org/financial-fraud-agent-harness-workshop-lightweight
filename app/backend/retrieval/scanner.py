@@ -1,7 +1,9 @@
 """Schema scanner: §5.2 of the notebook condensed into a single module.
 
 Mines Oracle's catalog views, turns each finding into a `Fact`, and OAMP
-stores each fact as a memory with appropriate kind metadata.
+stores each fact as a memory with appropriate kind metadata. After a scan the
+facts are also connected into a graph: column and relationship facts link to
+their table facts, so retrieval can walk from a table to its columns.
 """
 
 from __future__ import annotations
@@ -162,9 +164,74 @@ def write_facts(memory_client, facts: list[Fact], thread_id: str | None = None) 
     return {"new": new, "updated": updated, "skipped": skipped}
 
 
+def link_schema_facts(memory_client, owner: str) -> dict:
+    """Connect the schema knowledge graph for `owner`.
+
+    Column facts and relationship facts link to their table facts with
+    `supports` — deliberately **not** `refines`. OAMP retires the *target* of a
+    `refines`/`supersedes`/`duplicates` relation, and the table fact must stay
+    valid; `supports` leaves both endpoints current. OAMP stores one relation
+    per endpoint pair, so re-running the scanner only adds what is missing.
+
+    Returns ``{"links_created": n, "links_wanted": m}``.
+    """
+    owner = owner.upper()
+    store = memory_client._store
+
+    def _facts(kind: str) -> list:
+        return store.list(
+            "memory",
+            user_id=USER_ID, agent_id=AGENT_ID,
+            metadata_filter={"kind": kind},
+            limit=None,
+        ) or []
+
+    by_subject: dict[str, str] = {}
+    for kind in ("table", "column", "relationship"):
+        for record in _facts(kind):
+            subject = (getattr(record, "metadata", None) or {}).get("subject")
+            if subject:
+                by_subject[subject] = record.id
+
+    wanted: list[tuple[str, str]] = []
+    for record in _facts("column"):
+        meta = getattr(record, "metadata", None) or {}
+        if str(meta.get("owner", "")).upper() != owner:
+            continue
+        parent = f"{meta.get('owner')}.{meta.get('table')}"
+        if parent in by_subject:
+            wanted.append((record.id, by_subject[parent]))
+    for record in _facts("relationship"):
+        meta = getattr(record, "metadata", None) or {}
+        for parent in (meta.get("from"), meta.get("to")):
+            if parent and parent in by_subject:
+                wanted.append((record.id, by_subject[parent]))
+
+    existing = {
+        (rel.source_record_id, rel.target_record_id, rel.relation_type)
+        for rel in (store.list_relations(limit=None) or [])
+    }
+    to_add = [(s, t) for s, t in wanted if (s, t, "supports") not in existing]
+
+    created = 0
+    for i in range(0, len(to_add), 200):
+        chunk = to_add[i:i + 200]
+        ids = store.add_relations(
+            source_record_ids=[s for s, _ in chunk],
+            source_record_types="memory",
+            target_record_ids=[t for _, t in chunk],
+            target_record_types="memory",
+            relation_types="supports",
+            metadata=[{"source": "schema_scanner"} for _ in chunk],
+        )
+        created += len(ids or [])
+    return {"links_created": created, "links_wanted": len(wanted)}
+
+
 def run_scan(conn, memory_client, owner: str) -> dict:
     facts = scan_schema(conn, owner)
     summary = write_facts(memory_client, facts)
+    summary.update(link_schema_facts(memory_client, owner))
     summary["facts_total"] = len(facts)
     summary["owner"] = owner.upper()
     return summary

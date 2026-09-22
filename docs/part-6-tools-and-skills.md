@@ -13,7 +13,7 @@ Both use the same retrieval primitive — vector search over an in-database HNSW
 
 If the registry has 6 tools, it's harmless to put them all in every LLM call. Once you have 30+ tools (per-system MCP servers, per-team helpers), the model starts confusing them and the per-turn token bill grows linearly with the registry. Indexing tools by an embedding of `name + description + arg names` lets us pass *only the relevant top-k* for a given user query.
 
-We still always include a small **always-on** set — `run_sql`, `search_knowledge`, `remember`, `exec_js`, `load_skill` — they're cheap and the agent calls them on almost every turn.
+We still always include a small **always-on** set — `run_sql`, `search_knowledge`, `remember`, `link_memories`, `exec_js`, `load_skill` — they're cheap and the agent calls them on almost every turn.
 
 ![Toolbox flow — registration vs per-turn retrieval](../images/cover-toolbox-flow.png)
 
@@ -154,10 +154,11 @@ The notebook registers these tools beyond `tool_run_sql`:
 | Tool | What it does |
 |---|---|
 | `scan_database(owner)` | Run the §2 scanner against a schema; append facts to OAMP. |
-| `search_knowledge(query, k, kinds)` | Semantic search over the agent's long-term memory. |
+| `search_knowledge(query, k, kinds, follow_links)` | Semantic search over the agent's long-term memory; `follow_links=True` adds one hop of linked context. |
 | `exec_js(code)` | Run JavaScript inside Oracle MLE — deterministic compute the LLM shouldn't do in its head. |
 | `scratch_write(path, content)` / `scratch_read(path)` / `scratch_append(path, content)` | DBFS scratchpad I/O. |
-| `remember(subject, body, kind)` | Persist a correction or learning into memory. |
+| `remember(subject, body, kind, supersedes, link_type)` | Persist a correction or learning; `supersedes` retires the earlier fact it replaces. |
+| `link_memories(source, target, link_type, reason)` | Connect two memories the agent already knows (`supports`/`contradicts` keep both current). |
 | `load_skill(name)` / `list_skills(query)` | Read a prose playbook from the skillbox. |
 
 You'll see the agent dispatch most of these in §5's end-to-end demo.
@@ -232,7 +233,7 @@ The app renders a World Explorer globe from `GET /api/world` in `app/backend/api
 
 - **Tools are Python callables with embeddings.** The `@register` decorator introspects the function and writes a vector-indexed row. Function name + docstring + arg names *are* the public spec.
 - **Vector retrieval keeps the prompt lean.** With 30+ tools, including all of them every turn confuses the model. Top-k by cosine over the user query exposes only what's relevant — registry size grows without per-turn cost growing.
-- **Always-on vs retrieved.** Cheap-and-frequent tools (`run_sql`, `search_knowledge`, `remember`, `load_skill`) ship in every prompt. Specialised tools come from the toolbox lookup.
+- **Always-on vs retrieved.** Cheap-and-frequent tools (`run_sql`, `search_knowledge`, `remember`, `link_memories`, `load_skill`) ship in every prompt. Specialised tools come from the toolbox lookup.
 - **Tools answer "what can I call?". Skills answer "what do I know how to do?".** Tools are dispatched as function calls; skills are prose playbooks the model reads.
 - **A tool can return anything.** `run_sql` returns rows, `get_document` returns a JSON document, `focus_world` returns a place. The registry treats all three identically — name, docstring, args, embedding.
 

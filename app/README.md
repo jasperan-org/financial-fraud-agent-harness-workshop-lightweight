@@ -63,6 +63,8 @@ The harness is deliberately built from primitives the database already ships, so
 | `DBMS_SCHEDULER` | scaffolded for periodic schema rescans |
 | `DBMS_RLS` + application context (VPD) | `db/deep_security.py` — capability probe, persona→policy projection, and the installer in `scripts/setup_deep_security.py` |
 | Deep Data Security (`CREATE DATA GRANT`) | same module, `deep_sec_ddl()` — generated for 26ai Enterprise-class, not executable on Free |
+| Agent Memory Deep Data Security (OAMP >= 26.8) | same module — `UserOwnRows` + `GlobalMemories` policies over the OAMP store via the SDK; runtime identity via `OracleMemoryEndUserSecurityContext` |
+| Memory relations (OAMP >= 26.8) | `memory/manager.py` + `retrieval/scanner.py` — typed links between memories (`supersedes`, `supports`, `contradicts`, …), a schema graph linking column facts to table facts, and link-following retrieval |
 
 You'll learn how each primitive composes with the others — e.g., a duality view's row filter inherits the underlying-table DDS policy automatically, so an `analyst.east` user reading `account_dv` for an `AMERICAS` account just gets nothing back.
 
@@ -70,7 +72,9 @@ You'll learn how each primitive composes with the others — e.g., a duality vie
 
 The Oracle AI Agent Memory Package (`oracleagentmemory`) owns long-term semantic memory. The harness layers thread-scoping and provenance on top:
 
-- **Threads, memories, context cards** — three OAMP primitives that replace half a dozen hand-rolled tables.
+- **Threads, memories, context cards** — three OAMP primitives that replace half a dozen hand-rolled tables. The store's managed objects are named by `memory_store_id="EDA_ONNX"` (`EDA_ONNX_MEMORY`, `EDA_ONNX_THREAD`, …).
+- **Kernel-scoped memories (OAMP >= 26.8, Deep Sec databases)** — `UserOwnRowsDeepDataSecurityPolicy` + `GlobalMemoriesDeepDataSecurityPolicy` put the memory store under data-role/data-grant enforcement, and `OracleMemoryEndUserSecurityContext` attaches the acting end user to every memory read/write. On the shipped 26ai Free container this layer is probed and reported by `scripts/setup_deep_security.py`, not faked; there, thread scoping remains the runtime boundary.
+- **Memory relations** — corrections supersede the fact they replace (OAMP retires the old memory), `link_memories` connects facts the agent already knows, and the scanner links every column/relationship fact to its table fact with `supports`. Retrieval can follow one hop (`search_knowledge(follow_links=True)`), so a retired fact stays reachable as history instead of vanishing. The right pane renders the relations under each memory.
 - **Auto-extraction** — every few messages, OAMP runs the configured LLM (Grok-4 in the current `.env`) to mine durable facts and refresh a rolling thread summary. The harness tolerates auth failures here so a bad LLM config never takes down chat.
 - **Thread-scoped scratchpad** — every `scratch_write` lands at `/scratch/threads/<thread_id>/<path>`; two threads writing `findings.md` cannot collide. Verified in the data explorer's DBFS tab (each row carries its `THREAD_ID` column).
 - **Episodic memory** — `(user, assistant)` pairs from each turn are stored as OAMP memories tagged `kind=episodic` with their `thread_id`.
@@ -83,7 +87,7 @@ You'll learn how to scope per-thread state hard (scratchpad, episodic) while kee
 
 Tools live in two parallel structures:
 
-- **`toolbox`** — callable function specs. `@register` decorator introspects each tool's docstring + signature and writes the row with an in-DB `VECTOR_EMBEDDING` for retrieval. Per turn, `retrieve_tools(query, k=6)` does cosine + optional rerank, then merges in an always-on set (`run_sql`, `search_knowledge`, `remember`, `exec_js`, `load_skill`, `scratch_*`, `search_tavily`, `focus_world`).
+- **`toolbox`** — callable function specs. `@register` decorator introspects each tool's docstring + signature and writes the row with an in-DB `VECTOR_EMBEDDING` for retrieval. Per turn, `retrieve_tools(query, k=6)` does cosine + optional rerank, then merges in an always-on set (`run_sql`, `search_knowledge`, `remember`, `link_memories`, `exec_js`, `load_skill`, `scratch_*`, `search_tavily`, `focus_world`).
 - **`skillbox`** — prose markdown playbooks ingested from [`oracle/skills`](https://github.com/oracle/skills). The agent gets a top-3 manifest (just names + one-liners) prepended to its system prompt, and pulls a full body on demand via `load_skill(name)`.
 
 You'll learn:

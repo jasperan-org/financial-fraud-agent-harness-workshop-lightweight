@@ -83,6 +83,23 @@ function Item({ it, sectionKey }) {
           </span>
         </div>
         <div className="text-text-muted mt-0.5">{it.body}</div>
+        {Array.isArray(it.links) && it.links.length > 0 && (
+          <div className="mt-1 space-y-0.5 border-l border-white/10 pl-2">
+            {it.links.map((l, j) => (
+              <div key={j} className="flex items-start gap-1 text-[9px] leading-snug">
+                <span className="font-mono text-accent-skill shrink-0">
+                  {l.direction === "in" ? "←" : "→"} {l.relation}
+                </span>
+                <span
+                  className={`text-text-muted ${l.status === "INVALID" ? "line-through opacity-60" : ""}`}
+                  title={l.memory_id}
+                >
+                  {l.subject || l.body}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

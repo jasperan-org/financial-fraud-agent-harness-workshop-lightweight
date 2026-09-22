@@ -27,7 +27,7 @@ memory_client = OracleAgentMemory(
     llm=extraction_llm,                               # same chat provider/model as §1
     memory_extraction_config=MemoryExtractionConfig(extract_memories=True),  # mine durable facts
     schema_policy="create_if_necessary",              # OAMP owns its DDL
-    table_name_prefix="eda_onnx_",
+    memory_store_id="EDA_ONNX",                       # names the EDA_ONNX_* managed tables
 )
 ```
 
@@ -37,7 +37,7 @@ Three things to notice:
 2. **`OracleONNXEmbedder`** — wraps `SELECT VECTOR_EMBEDDING(ALL_MINILM_L12_V2 USING :t AS DATA) FROM dual`. Every embed call is a SQL statement on `agent_conn`. Zero network calls for embedding.
 3. **`extraction_llm`** — OAMP uses the same chat model your agent uses to extract durable memories from threads and maintain a rolling summary.
 
-`schema_policy="create_if_necessary"` means OAMP creates `eda_onnx_memory`, `eda_onnx_thread`, `eda_onnx_record_chunks`, etc. on first use. You never write DDL for memory tables.
+`schema_policy="create_if_necessary"` means OAMP creates `EDA_ONNX_MEMORY`, `EDA_ONNX_THREAD`, `EDA_ONNX_RECORD_CHUNKS`, etc. on first use. You never write DDL for memory tables. `memory_store_id` is the naming form OAMP >= 26.6 introduced (the older `table_name_prefix="eda_onnx_"` resolved to the same object names and is removed in 27.1). The workshop requires `oracleagentmemory>=26.8`: that release also adds database-native Deep Data Security for this store — see [Part 8](part-8-deep-data-security.md).
 
 ## TODO 2: Implement `OracleONNXEmbedder.embed`
 
@@ -160,9 +160,63 @@ After the four scanners run, the pre-built `write_facts()` function:
 2. Looks up an existing memory with the same `(kind, subject)` metadata.
 3. **If absent** — calls `memory_client.add_memory(...)` (which embeds + inserts).
 4. **If present and `body_hash` unchanged** — skips the embed call entirely.
-5. **If present and `body_hash` changed** — deletes the stale row, inserts the new one.
+5. **If present and `body_hash` changed** — updates the existing memory in place (same record id, so its links survive).
+6. **After the facts are written** — `link_schema_facts()` connects them: every column fact and relationship fact links to its table fact with `supports`.
 
 The hash check is what makes hourly re-scans free. The vast majority of calls hash-check and skip; only schema changes trigger an embed.
+
+## Relations and Links (OAMP >= 26.8)
+
+Facts do not exist in isolation. OAMP 26.8 stores a **directed relation** between two memories,
+and the relation type decides what happens to the target:
+
+| Type | Target after linking | Use for |
+|---|---|---|
+| `supersedes` | **retired** (`INVALID`) | a correction that replaces an earlier fact |
+| `refines` | **retired** (`INVALID`) | a more precise version of the same fact |
+| `duplicates` | **retired** (`INVALID`) | the same fact stored twice |
+| `contradicts` | stays valid | conflicting evidence you want flagged, not resolved |
+| `supports` | stays valid | corroborating evidence / structural detail |
+
+Retired memories stop appearing in normal search but stay reachable through link traversal, so
+nothing is lost — and "one orientation per endpoint pair" is enforced by the store, so re-linking is
+safe.
+
+```python
+# Correction: write the new fact and retire the old one in a single call.
+memory_client.add_memory(
+    "The STRUCTURING threshold is now $12,500.",
+    user_id=USER_ID, agent_id=AGENT_ID, metadata={"kind": "correction"},
+    memory_id_to_link=old_memory_id, link_type="supersedes",
+    autonomous_linking=False,        # deterministic; True lets the LLM pick extra links
+)
+
+# Traversal: one hop from each direct hit, in either direction.
+results = memory_client.search(
+    "STRUCTURING threshold", user_id=USER_ID,
+    max_results=5, num_hops=1, max_linked_results=20,
+)
+for r in results:
+    for relation, linked in (r.linked_results or []):
+        print(relation.relation_type, linked.status, linked.content)
+```
+
+`num_hops` accepts 0–5. Direct hits hide retired memories by default; the hop is what brings the
+history back (`include_invalid_results=False` + `num_hops=1` = "current truth plus its provenance").
+
+The workshop uses links in four places:
+
+- **`remember(supersedes=...)`** — the agent corrects a fact by memory id or by phrase; the old fact
+  is retired and stays visible through `search_knowledge(follow_links=True)`.
+- **`link_memories(source, target, link_type)`** — connects two facts the agent already knows;
+  `supports` / `contradicts` keep both current.
+- **`search_knowledge(follow_links=True)`** — adds one hop of linked context to every hit.
+- **The scanner graph** — `run_scan` links column and relationship facts to their table facts with
+  `supports`. Searching `FINANCE.TRANSACTIONS` with `follow_links=True` returns the table fact plus
+  its columns, without a join.
+
+The right-side Memory Context pane renders relations as `→ relation` / `← relation` chips under each
+memory, with retired ones struck through.
 
 ## Key Takeaways — Part 2
 
@@ -170,6 +224,7 @@ The hash check is what makes hourly re-scans free. The vast majority of calls ha
 - **Catalog views are training data.** `ALL_TABLES + ALL_TAB_COLUMNS + ALL_CONSTRAINTS + V$SQL` mined into prose facts is how you teach an agent your schema without fine-tuning a model.
 - **`body_hash` makes re-scans free.** The scanner only re-embeds facts whose underlying text changed. Hourly re-scans become viable when the dedup is content-based, not time-based.
 - **Procedural memory is different.** `scan_history` (when/how the agent ran) is queried by time and owner, not by meaning — keep it as a regular indexed table, not an OAMP memory.
+- **Links beat duplication.** Relation types carry lifecycle semantics: `supersedes`/`refines`/`duplicates` retire the target, `contradicts`/`supports` keep both. Retired facts disappear from normal search but stay one hop away, so corrections never lose history.
 
 ## Troubleshooting
 

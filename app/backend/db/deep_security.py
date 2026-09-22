@@ -35,6 +35,16 @@ view is absent, and `CREATE DATA ROLE` / `CREATE END USER` / `CREATE DATA GRANT`
 / `CREATE DATA SECURITY POLICY` all fail with `ORA-00901 (invalid CREATE
 command)`. `probe()` reports that honestly instead of failing at demo time.
 
+OAMP 26.8 adds a third enforcement surface for the agent's *own* memory store:
+`oracleagentmemory.core.deepsec` ships `UserOwnRowsDeepDataSecurityPolicy` and
+`GlobalMemoriesDeepDataSecurityPolicy`, which compile to data roles and data
+grants over the OAMP-managed `EDA_ONNX_*` tables, plus
+`OracleMemoryEndUserSecurityContext` to attach the end-user identity to every
+memory read and write. That layer needs the same Enterprise-class data roles
+and data grants the FINANCE layer needs, so on the Free edition it is reported,
+not installed — see `install_memory_policies()` and
+`docs/part-8-deep-data-security.md`.
+
 The persona → end-user-name convention matches what `setup_advanced.py` already
 seeds: ``<persona id>@meridianbank.example``.
 """
@@ -52,6 +62,10 @@ END_USER_DOMAIN = "meridianbank.example"
 # `oracledb.create_end_user_security_context()` landed in python-oracledb 4.0.
 MIN_DRIVER_FOR_DEEP_SEC = (4, 0)
 
+# `oracleagentmemory.core.deepsec` (memory-store policies + end-user context)
+# landed in oracleagentmemory 26.8.
+MIN_OAMP_FOR_MEMORY_DEEP_SEC = (26, 8)
+
 DEEP_SEC = "DEEP_SEC"
 VPD = "VPD"
 APP_ONLY = "APP_ONLY"
@@ -65,6 +79,20 @@ def end_user_name(identity_id: str) -> str:
 def identifier_fragment(identity_id: str) -> str:
     """`analyst.east` -> `ANALYST_EAST` (legal inside an unquoted identifier)."""
     return re.sub(r"[^A-Za-z0-9]+", "_", identity_id).strip("_").upper()
+
+
+def local_end_user_name(identity_id: str) -> str:
+    """`analyst.east` -> `ANALYST_EAST`, a valid *unquoted* end-user identifier.
+
+    Oracle Deep Data Security local end users are database identifiers
+    (``CREATE END USER ANALYST_EAST``), and the OAMP 26.8 administration API
+    validates `LocalEndUserPrincipal` against the same rule: no dots, no ``@``,
+    no quotes. UPN-style identities stay useful on the FINANCE side and as the
+    external-authenticator name (``AND FACTOR ... AS '<upn>'``), but the
+    memory-store policies must be granted to a principal the SDK can address —
+    a local end user like this, or an `OciGroupPrincipal` for OCI IAM.
+    """
+    return identifier_fragment(identity_id)
 
 
 def data_role_name(identity_id: str) -> str:
@@ -89,6 +117,8 @@ class Capability:
     has_dbms_rls: bool = False
     has_eda_context: bool = False
     has_eda_setter: bool = False
+    oamp_version: str = "unknown"
+    has_oamp_deepsec: bool = False
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -99,11 +129,17 @@ class Capability:
     def supports_vpd(self) -> bool:
         return self.has_dbms_rls
 
+    @property
+    def supports_memory_deep_sec(self) -> bool:
+        """Memory-store Deep Sec needs the database feature *and* OAMP >= 26.8."""
+        return self.supports_deep_sec and self.has_oamp_deepsec
+
     def summary(self) -> str:
         return (
             f"backend={self.backend} version={self.version!r} "
             f"deep_sec={self.supports_deep_sec} vpd={self.supports_vpd} "
-            f"eda_context={self.has_eda_context}"
+            f"eda_context={self.has_eda_context} oamp={self.oamp_version} "
+            f"memory_deep_sec={self.supports_memory_deep_sec}"
         )
 
     def as_json(self) -> dict[str, Any]:
@@ -114,6 +150,8 @@ class Capability:
             "deep_sec": self.supports_deep_sec,
             "vpd": self.supports_vpd,
             "eda_context": self.has_eda_context,
+            "oamp_version": self.oamp_version,
+            "memory_deep_sec": self.supports_memory_deep_sec,
             "notes": list(self.notes),
         }
 
@@ -142,6 +180,25 @@ def _scalar(cur, sql: str, default=None, **binds):
         return default
 
 
+def _oamp_deepsec_info() -> tuple[str, bool]:
+    """(version, api_present) for the installed OAMP SDK.
+
+    `core.deepsec` only exists in oracleagentmemory >= 26.8, and the rest of the
+    workshop works fine without it, so absence is a reportable state rather than
+    an import error.
+    """
+    try:
+        import oracleagentmemory  # noqa: PLC0415 - optional at probe time
+    except Exception:
+        return "not installed", False
+    version = str(getattr(oracleagentmemory, "__version__", "unknown"))
+    try:
+        from oracleagentmemory.core import deepsec  # noqa: F401, PLC0415
+    except Exception:
+        return version, False
+    return version, True
+
+
 # Probing costs six dictionary queries and the answer cannot change while the
 # process lives, so it is done once per process. `refresh=True` re-reads it
 # (used after an installer run).
@@ -164,6 +221,7 @@ def probe(conn, *, refresh: bool = False) -> Capability:
 
 def _probe_uncached(conn) -> Capability:
     cap = Capability()
+    cap.oamp_version, cap.has_oamp_deepsec = _oamp_deepsec_info()
     with conn.cursor() as cur:
         cap.version = str(
             _scalar(cur, "SELECT banner_full FROM v$version", "unknown")
@@ -219,6 +277,17 @@ def _probe_uncached(conn) -> Capability:
 
     if cap.supports_deep_sec:
         cap.backend = DEEP_SEC
+        if cap.has_oamp_deepsec:
+            cap.notes.append(
+                f"OAMP {cap.oamp_version}: memory-store Deep Data Security "
+                "(UserOwnRows + GlobalMemories policies) is available."
+            )
+        else:
+            wanted = ".".join(str(p) for p in MIN_OAMP_FOR_MEMORY_DEEP_SEC)
+            cap.notes.append(
+                f"OAMP {cap.oamp_version}: no core.deepsec module, so the memory "
+                f"store cannot be placed under Deep Sec; upgrade to >= {wanted}."
+            )
     elif cap.supports_vpd:
         cap.backend = VPD
         if not (cap.has_eda_context and cap.has_eda_setter):
@@ -237,6 +306,11 @@ def _probe_uncached(conn) -> Capability:
         cap.notes.append(
             "Neither Deep Sec nor DBMS_RLS is available; only the Python "
             "post-filters in api/identities.py apply."
+        )
+    if cap.has_oamp_deepsec and not cap.supports_deep_sec:
+        cap.notes.append(
+            f"OAMP {cap.oamp_version} has the memory Deep Data Security API, but "
+            "this database has no data roles/data grants to enforce it."
         )
     return cap
 
@@ -366,17 +440,21 @@ def deep_sec_ddl(
 
     for ident in identities.values():
         role = data_role_name(ident.id)
-        user = end_user_name(ident.id)
+        user = local_end_user_name(ident.id)
         stmts.append("")
         stmts.append(f"-- persona: {ident.id}  ({ident.label}, {ident.clearance})")
         stmts.append(f"CREATE DATA ROLE {role};")
 
         if end_user_password:
-            # End users are UPNs, so the identifier is quoted to survive the '@'.
+            # Local Deep Sec end users are unquoted DB identifiers. If the
+            # persona also has an external identity (UPN), record it on the
+            # user instead of making it the identifier:
+            #   CREATE END USER {user} IDENTIFIED BY "..."
+            #     AND FACTOR 'oma_push' AS 'analyst.east@meridianbank.example';
             stmts.append(
-                f'CREATE END USER "{user}" IDENTIFIED BY "{end_user_password}";'
+                f"CREATE END USER {user} IDENTIFIED BY \"{end_user_password}\";"
             )
-        stmts.append(f'GRANT DATA ROLE {role} TO "{user}";')
+        stmts.append(f"GRANT DATA ROLE {role} TO {user};")
         if application_identity:
             stmts.append(f"GRANT DATA ROLE {role} TO {application_identity};")
 
@@ -431,7 +509,7 @@ def deep_sec_ddl(
         "-- Runtime: the application attaches an EndUserSecurityContext per request.",
         "--   import oracledb",
         "--   ctx = oracledb.create_end_user_security_context(",
-        "--       end_user_identity=(\"ANALYST.EAST@MERIDIANBANK.EXAMPLE\", key),",
+        "--       end_user_identity=(\"ANALYST_EAST\", key),   # the local end-user name",
         "--       database_access_token=token,          # OBO or client-credentials",
         "--       data_roles=[\"EDA_ANALYST_EAST_ROLE\"],",
         "--   )",
@@ -439,6 +517,17 @@ def deep_sec_ddl(
         "-- Query-side helpers: ORA_IS_COLUMN_AUTHORIZED(col) distinguishes a real",
         "-- NULL from a masked one; ORA_CHECK_DATA_PRIVILEGE(obj,'UPDATE',col)",
         "-- answers 'may I?' before the statement runs.",
+        "--",
+        "-- Agent memory: OAMP >= 26.8 manages the Deep Data Security policies for its",
+        "-- own store; do NOT hand-write data roles or grants for the EDA_ONNX_* tables.",
+        "--   policies = [UserOwnRowsDeepDataSecurityPolicy(),",
+        "--               GlobalMemoriesDeepDataSecurityPolicy()]",
+        "--   add_deep_data_security_policies(conn, 'AGENT', 'EDA_ONNX', policies)",
+        "--   grant_agent_memory_policies(conn, 'EDA_ONNX', 'AGENT',",
+        "--       [LocalEndUserPrincipal('ANALYST_EAST')], policies)  # unquoted identifier;",
+        "--       # OCI IAM deployments use OciGroupPrincipal('<group>') instead",
+        "-- Runtime memory reads/writes are wrapped in an OAMP end-user context:",
+        "--   with OracleMemoryEndUserSecurityContext(ctx): thread.add_messages(...)",
     ]
     return stmts
 
@@ -470,6 +559,209 @@ def latest_driver_supports_deep_sec() -> tuple[bool, str]:
             f"create_end_user_security_context()"
         )
     return True, f"python-oracledb {oracledb.__version__}"
+
+
+# --------------------------------------------------------------------------- #
+# Backend A2: OAMP memory-store Deep Data Security (OAMP >= 26.8)
+# --------------------------------------------------------------------------- #
+#
+# oracleagentmemory 26.8 manages Deep Data Security for its own store: the SDK
+# creates the data roles and data grants over the EDA_ONNX_* tables, assigns
+# them to end users or OCI IAM groups, and attaches the end-user identity to
+# every memory operation. The policy internals stay private to the SDK, so the
+# only supported entry points are the ones wrapped here.
+
+
+def oamp_memory_deep_sec_available() -> tuple[bool, str]:
+    """Whether the installed OAMP SDK can administer memory Deep Data Security.
+
+    Returns ``(available, detail)``. `detail` is safe to print: it names the
+    installed version and, on older releases, the version that is required.
+    """
+    version, present = _oamp_deepsec_info()
+    if present:
+        return True, f"oracleagentmemory {version} (core.deepsec present)"
+    if version == "not installed":
+        return False, "oracleagentmemory not importable"
+    wanted = ".".join(str(p) for p in MIN_OAMP_FOR_MEMORY_DEEP_SEC)
+    return False, (
+        f"oracleagentmemory {version} has no core.deepsec module; "
+        f"memory Deep Data Security needs >= {wanted}"
+    )
+
+
+@dataclass
+class MemoryPolicyReport:
+    """OAMP memory-store policies and their per-principal assignments."""
+
+    store: str = ""
+    installed: list[str] = field(default_factory=list)
+    assignments: list[tuple[str, list[str]]] = field(default_factory=list)
+
+    @property
+    def granted_principals(self) -> int:
+        return len(self.assignments)
+
+    def summary(self) -> str:
+        return (
+            f"store={self.store} policies={self.installed} "
+            f"principals={[name for name, _ in self.assignments]}"
+        )
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "store": self.store,
+            "installed": list(self.installed),
+            "assignments": [
+                {"principal": name, "policies": list(policies)}
+                for name, policies in self.assignments
+            ],
+        }
+
+
+def _principal_name(principal) -> str:
+    """Readable name for an OAMP Principal (local end user or OCI IAM group)."""
+    return str(
+        getattr(principal, "username", None)
+        or getattr(principal, "group_name", None)
+        or type(principal).__name__
+    )
+
+
+def memory_policy_set() -> list:
+    """The two OAMP-managed Deep Data Security policy objects.
+
+    `UserOwnRowsDeepDataSecurityPolicy` grants row-scoped SELECT, column-scoped
+    INSERT/UPDATE and row-scoped DELETE on rows the end user owns;
+    `GlobalMemoriesDeepDataSecurityPolicy` adds read access to unscoped
+    (`user_id IS NULL`) memories and to links whose endpoints are both visible.
+    """
+    from oracleagentmemory.core.deepsec import (  # noqa: PLC0415
+        GlobalMemoriesDeepDataSecurityPolicy,
+        UserOwnRowsDeepDataSecurityPolicy,
+    )
+    return [
+        UserOwnRowsDeepDataSecurityPolicy(),
+        GlobalMemoriesDeepDataSecurityPolicy(),
+    ]
+
+
+def install_memory_policies(
+    conn,
+    identities: dict,
+    *,
+    owner_schema: str,
+    memory_store_id: str,
+    principal_factory=None,
+) -> MemoryPolicyReport:
+    """Create the OAMP memory data grants and assign them to every persona.
+
+    Requires an Enterprise-class database (data roles and data grants) and
+    oracleagentmemory >= 26.8; callers should gate on
+    ``probe().supports_memory_deep_sec``. `conn` must be a dedicated
+    security-administration connection with no end-user security context — not
+    the schema-owner or runtime application connection.
+
+    By default each persona is granted to a local end user named by
+    `local_end_user_name()` (``analyst.east`` -> ``ANALYST_EAST``), which is
+    what ``LocalEndUserPrincipal`` requires: the OAMP 26.8 API rejects names
+    containing ``.`` or ``@``. Pass `principal_factory(ident)` to grant to
+    something else — e.g. ``OciGroupPrincipal`` for an OCI IAM group whose
+    ``group`` claim arrives in the end-user access token.
+    """
+    ok, detail = oamp_memory_deep_sec_available()
+    if not ok:
+        raise RuntimeError(detail)
+    from oracleagentmemory.core.deepsec import (  # noqa: PLC0415
+        LocalEndUserPrincipal,
+        add_deep_data_security_policies,
+        grant_agent_memory_policies,
+    )
+
+    if principal_factory is None:
+        def principal_factory(ident):
+            return LocalEndUserPrincipal(local_end_user_name(ident.id))
+
+    policies = memory_policy_set()
+    add_deep_data_security_policies(
+        conn,
+        owner_schema=owner_schema,
+        memory_store_id=memory_store_id,
+        policies=policies,
+    )
+
+    report = MemoryPolicyReport(
+        store=f"{owner_schema}.{memory_store_id}",
+        installed=[type(p).__name__ for p in policies],
+    )
+    for ident in identities.values():
+        principal = principal_factory(ident)
+        grant_agent_memory_policies(
+            conn,
+            memory_store_id=memory_store_id,
+            owner_schema=owner_schema,
+            principals=[principal],
+            policies=policies,
+        )
+        report.assignments.append(
+            (_principal_name(principal), [type(p).__name__ for p in policies])
+        )
+    return report
+
+
+def list_memory_policies(
+    conn,
+    *,
+    owner_schema: str,
+    memory_store_id: str,
+) -> MemoryPolicyReport:
+    """Read back the installed policies and grants (needs the DBA data views)."""
+    ok, detail = oamp_memory_deep_sec_available()
+    if not ok:
+        raise RuntimeError(detail)
+    from oracleagentmemory.core.deepsec import (  # noqa: PLC0415
+        list_agent_memory_granted_policies,
+        list_deep_data_security_policies,
+    )
+
+    policies = list_deep_data_security_policies(
+        conn, owner_schema=owner_schema, memory_store_id=memory_store_id
+    )
+    assignments = list_agent_memory_granted_policies(
+        conn, memory_store_id=memory_store_id, owner_schema=owner_schema
+    )
+
+    report = MemoryPolicyReport(
+        store=f"{owner_schema}.{memory_store_id}",
+        installed=[type(p).__name__ for p in policies],
+    )
+    for principal, granted in assignments:
+        report.assignments.append(
+            (_principal_name(principal), [type(p).__name__ for p in granted])
+        )
+    return report
+
+
+def memory_end_user_context(security_context):
+    """Wrap OAMP memory operations in an end-user security context.
+
+    Pass the object returned by ``oracledb.create_end_user_security_context()``
+    and use the result as a context manager::
+
+        with memory_end_user_context(ctx):
+            thread.add_messages(messages)
+
+    Every OAMP database operation then attaches the identity after acquiring a
+    connection and clears it before releasing it, for sync and async calls.
+    Requires oracleagentmemory >= 26.8.
+    """
+    ok, detail = oamp_memory_deep_sec_available()
+    if not ok:
+        raise RuntimeError(detail)
+    from oracleagentmemory.core.deepsec import (  # noqa: PLC0415
+        OracleMemoryEndUserSecurityContext,
+    )
+    return OracleMemoryEndUserSecurityContext(security_context)
 
 
 # --------------------------------------------------------------------------- #
@@ -523,7 +815,9 @@ def set_identity(conn, identity, *, end_user: str | None = None) -> str:
             "Deep Sec requires an IAM-issued database-access token per request. "
             "Wire oracledb.create_end_user_security_context(end_user_identity=..., "
             "database_access_token=..., data_roles=[...]) into the connection "
-            "factory, then call conn.set_end_user_security_context(ctx)."
+            "factory, then call conn.set_end_user_security_context(ctx). For OAMP "
+            "memory operations, wrap the call in memory_end_user_context(ctx) so "
+            "the memory store applies the same identity."
         )
 
     if cap.backend == VPD:

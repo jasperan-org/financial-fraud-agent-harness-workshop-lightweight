@@ -32,6 +32,12 @@ from config import (
 )
 from retrieval.scanner import Fact, run_scan, write_facts
 from db.deep_security import set_identity as set_db_identity
+from memory.manager import (
+    INVALIDATING_LINK_TYPES,
+    LINK_TYPES,
+    find_memory,
+    link_memories,
+)
 
 
 # Module-level state — populated on first call to `init_tools()`.
@@ -100,7 +106,8 @@ def _scoped_scratch_path(path: str) -> str:
 
 TOOLS: dict[str, tuple] = {}
 ALWAYS_ON_TOOLS = {
-    "search_knowledge", "run_sql", "remember", "exec_js", "load_skill",
+    "search_knowledge", "run_sql", "remember", "link_memories", "exec_js",
+    "load_skill",
     "scratch_write", "scratch_append", "scratch_read",
     "search_tavily", "focus_world",
     "fetch_tool_output",
@@ -233,7 +240,8 @@ def ensure_toolbox(agent_conn):
 _READ_ONLY = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 
 
-def _retrieve_knowledge(query: str, k: int = 5, kinds=None) -> list[dict]:
+def _retrieve_knowledge(query: str, k: int = 5, kinds=None,
+                        follow_links: bool = False) -> list[dict]:
     """Cosine + rerank over OAMP memories. Filters out tool-output kind.
 
     OAM.search returns SearchResult wrappers — `.content` is the body, `.record`
@@ -242,6 +250,11 @@ def _retrieve_knowledge(query: str, k: int = 5, kinds=None) -> list[dict]:
 
     `kinds` is documented as list[str] | None, but LLMs sometimes pass a
     comma-separated string instead. Coerce defensively.
+
+    INVALID memories (superseded/refined/duplicated) are excluded from direct
+    hits: after a correction, the old fact should not be retrieved as current
+    truth. `follow_links=True` asks OAMP for one hop of linked context, which
+    *does* include those retired versions — that is how history stays visible.
     """
     # Coerce string -> list[str] (the LLM occasionally hands us "table,column").
     if isinstance(kinds, str):
@@ -251,10 +264,13 @@ def _retrieve_knowledge(query: str, k: int = 5, kinds=None) -> list[dict]:
     if kinds == []:
         kinds = None
 
+    link_kwargs = {"num_hops": 1, "max_linked_results": 20} if follow_links else {}
     raw_results = _MEMORY_CLIENT.search(
         query=query,
         user_id=USER_ID, agent_id=AGENT_ID,
         max_results=k * 4,
+        include_invalid_results=False,
+        **link_kwargs,
     )
     candidates = []
     for r in raw_results or []:
@@ -270,11 +286,33 @@ def _retrieve_knowledge(query: str, k: int = 5, kinds=None) -> list[dict]:
         body = getattr(r, "content", "") or ""
         if hasattr(body, "read"):
             body = body.read()
+        links = []
+        if follow_links:
+            direct_id = getattr(r, "id", None) or getattr(rec, "id", None)
+            for rel, linked in (getattr(r, "linked_results", None) or []):
+                lmeta = getattr(linked, "metadata", None) or {}
+                lbody = getattr(linked, "content", "") or ""
+                if hasattr(lbody, "read"):
+                    lbody = lbody.read()
+                if rel.source_record_id == direct_id:
+                    label, direction = rel.relation_type, "out"
+                else:
+                    label = rel.opposite_relation_type or rel.relation_type
+                    direction = "in"
+                links.append({
+                    "relation": label,
+                    "direction": direction,
+                    "status": str(getattr(linked, "status", "")).split(".")[-1],
+                    "kind": lmeta.get("kind", "memory"),
+                    "subject": lmeta.get("subject", ""),
+                    "body": str(lbody),
+                })
         candidates.append({
             "kind": kind_value or "memory",
             "subject": meta.get("subject", ""),
             "body": str(body),
             "metadata": meta,
+            "links": links,
         })
     if _RERANK:
         return _RERANK(query, candidates, top_k=k, content_key="body")
@@ -412,14 +450,20 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
     TOOLS.clear()
 
     @register
-    def tool_search_knowledge(query: str, k: int = 5, kinds: list[str] | None = None) -> str:
+    def tool_search_knowledge(query: str, k: int = 5, kinds: list[str] | None = None,
+                              follow_links: bool = False) -> str:
         """Search institutional knowledge (what the agent has learned about the target database) by semantic similarity.
         Use this BEFORE running SQL to discover which tables and columns are relevant.
         `kinds` is an optional filter: table, column, relationship, query_pattern, correction.
+        `follow_links` also returns memories linked to each hit (one hop): corrections show the
+        fact they superseded, and schema facts show the tables/columns they connect to. Superseded
+        facts are hidden from normal results but visible here.
         """
-        hits = _retrieve_knowledge(query, k=k, kinds=kinds)
+        hits = _retrieve_knowledge(query, k=k, kinds=kinds, follow_links=follow_links)
         for h in hits:
             h["body"] = h["body"][:500]
+            for link in h.get("links", []):
+                link["body"] = link["body"][:300]
         return json.dumps(hits)
 
     @register
@@ -533,7 +577,9 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         return json.dumps(out, default=str)
 
     @register
-    def tool_remember(subject: str, body: str, kind: str = "correction") -> str:
+    def tool_remember(subject: str, body: str, kind: str = "correction",
+                      supersedes: str | None = None,
+                      link_type: str = "supersedes") -> str:
         """Persist a correction or learning into institutional knowledge so future turns benefit.
         Use when the user corrects you, or when you discover a non-obvious fact that future retrievals should surface.
 
@@ -542,14 +588,83 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         they were first written on, so you can trace provenance.
 
         `subject` is a short label (e.g. 'SALES.ORDERS.total_cents'); `body` is the fact written as a full sentence.
+
+        When this replaces an earlier fact, pass `supersedes` with the old memory's id OR a phrase that
+        finds it. The new memory is linked to the old one and OAMP retires the old fact (it stops
+        appearing in normal search but stays visible through search_knowledge(follow_links=True)).
+        `link_type` is normally 'supersedes'.
         """
         tid = get_request_thread_id()
+        if supersedes:
+            target = find_memory(_MEMORY_CLIENT, supersedes)
+            if target is None:
+                return json.dumps({
+                    "ok": False,
+                    "error": f"no memory matched {supersedes!r}; write it without "
+                             "`supersedes` if there is no earlier fact to retire",
+                })
+            meta = {"kind": kind, "subject": subject, "source": "agent_remember"}
+            if tid:
+                meta["origin_thread_id"] = tid
+            kwargs = dict(
+                user_id=USER_ID, agent_id=AGENT_ID, metadata=meta,
+                memory_id_to_link=target.id, link_type=link_type,
+                autonomous_linking=False,
+            )
+            if tid:
+                kwargs["thread_id"] = tid
+            new_id = _MEMORY_CLIENT.add_memory(body, **kwargs)
+            target_meta = getattr(target, "metadata", None) or {}
+            return json.dumps({
+                "ok": True,
+                "memory_id": new_id,
+                "linked_to": target.id,
+                "link_type": link_type,
+                "retired_subject": target_meta.get("subject", ""),
+                "retired_status": str(getattr(target, "status", "")).split(".")[-1],
+                "origin_thread_id": tid,
+            })
         fact = Fact(
             kind=kind, subject=subject, body=body,
             metadata={"source": "agent_remember"},
         )
         result = write_facts(_MEMORY_CLIENT, [fact], thread_id=tid)
         return json.dumps({"ok": True, "origin_thread_id": tid, **result})
+
+    @register
+    def tool_link_memories(source: str, target: str, link_type: str = "supports",
+                           reason: str = "") -> str:
+        """Link two memories you already know about, so retrieval can follow the connection.
+        `source` and `target` are memory ids or phrases that find them; the relation reads
+        source -> target. Types:
+          supports / contradicts  - both memories stay current (evidence, or a flagged conflict)
+          supersedes / refines / duplicates - the TARGET is retired (hidden from normal search,
+                                              still visible via search_knowledge(follow_links=True))
+        Use `remember(supersedes=...)` for the common correction flow; use this tool to connect
+        facts that were written at different times (e.g. a later observation that supports an earlier one).
+        """
+        if link_type not in LINK_TYPES:
+            return json.dumps({"ok": False,
+                               "error": f"link_type must be one of {list(LINK_TYPES)}"})
+        src = find_memory(_MEMORY_CLIENT, source)
+        tgt = find_memory(_MEMORY_CLIENT, target)
+        if src is None or tgt is None:
+            missing = source if src is None else target
+            return json.dumps({"ok": False, "error": f"no memory matched {missing!r}"})
+        if src.id == tgt.id:
+            return json.dumps({"ok": False, "error": "source and target are the same memory"})
+        rel_id = link_memories(
+            _MEMORY_CLIENT, src.id, tgt.id, link_type=link_type,
+            metadata={"source": "agent_link", **({"reason": reason} if reason else {})},
+        )
+        return json.dumps({
+            "ok": rel_id is not None,
+            "relation_id": rel_id,
+            "link_type": link_type,
+            "source_id": src.id,
+            "target_id": tgt.id,
+            "target_retired": link_type in INVALIDATING_LINK_TYPES,
+        })
 
     @register
     def tool_scan_database(owner: str) -> str:

@@ -59,8 +59,8 @@ Example — an analyst scoped to two regions, with amounts withheld:
 
 ```sql
 CREATE DATA ROLE eda_analyst_east_role;
-CREATE END USER "analyst.east@meridianbank.example" IDENTIFIED BY "...";
-GRANT DATA ROLE eda_analyst_east_role TO "analyst.east@meridianbank.example";
+CREATE END USER analyst_east IDENTIFIED BY "...";
+GRANT DATA ROLE eda_analyst_east_role TO analyst_east;
 
 -- rows: EUROPE + MIDDLE_EAST only
 CREATE OR REPLACE DATA GRANT eda_analyst_east_transactions AS
@@ -79,12 +79,16 @@ The client then attaches an identity instead of trusting itself:
 
 ```python
 ctx = oracledb.create_end_user_security_context(
-    end_user_identity=("ANALYST.EAST@MERIDIANBANK.EXAMPLE", key),
+    end_user_identity=("ANALYST_EAST", key),
     database_access_token=token,                 # OBO or client-credentials
     data_roles=["EDA_ANALYST_EAST_ROLE"],
 )
 conn.set_end_user_security_context(ctx)
 ```
+
+Local end users are unquoted DB identifiers. A UPN belongs in the external-authenticator clause
+(`AND FACTOR 'oma_push' AS 'analyst.east@meridianbank.example'`), and OCI IAM deployments grant the
+memory-store policies to `OciGroupPrincipal`s rather than local end users.
 
 The agent no longer has to be trusted. It can emit the broadest SQL it likes; the kernel returns the
 rows its end user is entitled to and nothing else.
@@ -99,6 +103,8 @@ release            : Oracle AI Database 26ai Free Release 23.26.1.0.0
 DBMS_DEEP_SEC      : ABSENT
 data-grant views   : ABSENT        (no DBA_DATA_GRANTS / DBA_DATA_ROLES / DBA_END_USERS)
 DBMS_RLS           : present
+OAMP               : 26.8.0
+OAMP memory DDS    : available as an API, not enforceable on Free
 => enforcement     : VPD
 ```
 
@@ -167,18 +173,26 @@ cd app && python scripts/setup_deep_security.py --demo
 ```
 
 ```
-persona              clearance  transactions regions          amount  SAR rows   balance
+persona              clearance  transactions regions              amount  SAR rows   balance
 --------------------------------------------------------------------------------------------
-agent                STANDARD           1199 AMER,APAC,EU,ME     NULL         0      NULL
-cfo                  EXECUTIVE          1199 AMER,APAC,EU,ME  visible         0   visible
-compliance.officer   EXECUTIVE          1199 AMER,APAC,EU,ME  visible        15   visible
-analyst.east         STANDARD            553 EU,ME               NULL         0      NULL
-analyst.west         STANDARD            646 AMER,APAC           NULL         0      NULL
-ops.viewer           STANDARD           1199 AMER,APAC,EU,ME     NULL         0      NULL
+agent                STANDARD           1199 AMER,APAC,EU,ME        NULL         0      NULL
+cfo                  EXECUTIVE          1199 AMER,APAC,EU,ME     visible         0   visible
+compliance.officer   EXECUTIVE          1199 AMER,APAC,EU,ME     visible        15   visible
+analyst.east         STANDARD            553 EU,ME                  NULL         0      NULL
+analyst.west         STANDARD            646 AMER,APAC              NULL         0      NULL
+ops.viewer           STANDARD           1199 AMER,APAC,EU,ME        NULL         0      NULL
+--------------------------------------------------------------------------------------------
+NULL means masked, not empty: the row came back, the value did not.
+SAR rows = 0 for every persona except compliance.officer (default-deny).
+
+  -- agent memory store (OAMP >= 26.8 Deep Data Security)
+  not enforceable on backend=VPD: no data roles/data grants for the memory tables.
 ```
 
 One `SELECT`, six personas, no application-layer filtering anywhere on the path. `NULL` means
-*masked*, not empty: the row came back, the value did not.
+*masked*, not empty: the row came back, the value did not. The memory section is the honest
+Free result for the OAMP layer added above: the API is present and probed, the data roles it
+needs are not.
 
 The full matrix — every table × every persona — with an independent check:
 
@@ -220,6 +234,96 @@ exists. Regenerate the section from the repository root with
 >    is safe only because each read sets it immediately before executing. A production harness would
 >    use one connection (or a session pool with fixed contexts) per concurrent turn.
 
+## Agent memory is data too — OAMP 26.8 Deep Data Security
+
+Parts 2–7 store a great deal in the `AGENT` schema: every tool output, scanned schema fact, extracted
+preference, and episodic turn lands in the OAMP-managed `EDA_ONNX_*` tables. That store contains the
+same class of content as `FINANCE` — and until OAMP 26.8 it was protected only by application-level
+thread and user scoping. `SELECT * FROM agent.eda_onnx_memory` returned every user's memories to
+whoever held the connection.
+
+`oracleagentmemory` 26.8 closes that gap with the same database-native model this part argues for.
+The release adds four surfaces to the SDK:
+
+| Surface | What it does |
+|---|---|
+| `UserOwnRowsDeepDataSecurityPolicy` | row-scoped `SELECT`, column-scoped `INSERT`/`UPDATE`, row-scoped `DELETE` on the end user's own memory rows (ownership, record type, and generated columns are immutable after insert; chunks are replaced, not updated) |
+| `GlobalMemoriesDeepDataSecurityPolicy` | read access to unscoped (`user_id IS NULL`) memories plus links whose endpoints are both visible |
+| `add_deep_data_security_policies` · `grant_agent_memory_policies` · `list_*` · `remove_*` · `revoke_*` | administration API — creates the data roles and data grants for one `owner_schema` + `memory_store_id`, then assigns them to `LocalEndUserPrincipal` or `OciGroupPrincipal` grantees |
+| `OracleMemoryEndUserSecurityContext` | runtime context manager that attaches the end user to every OAMP operation (sync and async), verifies the identity on the acquired connection, and clears it before release; background extraction keeps a private snapshot |
+
+The policy internals — managed tables, roles, grants, SQL — stay private to the SDK and may change
+between releases. That is why the workshop installs them through the API instead of hand-writing DDL:
+
+```python
+from oracleagentmemory.core.deepsec import (
+    GlobalMemoriesDeepDataSecurityPolicy,
+    LocalEndUserPrincipal,
+    UserOwnRowsDeepDataSecurityPolicy,
+    add_deep_data_security_policies,
+    grant_agent_memory_policies,
+)
+
+policies = [UserOwnRowsDeepDataSecurityPolicy(),
+            GlobalMemoriesDeepDataSecurityPolicy()]
+
+add_deep_data_security_policies(
+    sys_conn, owner_schema="AGENT", memory_store_id="EDA_ONNX", policies=policies)
+
+for persona in IDENTITIES.values():
+    grant_agent_memory_policies(
+        sys_conn, memory_store_id="EDA_ONNX", owner_schema="AGENT",
+        principals=[LocalEndUserPrincipal(local_end_user_name(persona.id))],
+        policies=policies)
+```
+
+`local_end_user_name()` maps `analyst.east` to the unquoted identifier `ANALYST_EAST`; the OAMP 26.8
+API rejects `LocalEndUserPrincipal` names containing `.` or `@`, and an OCI IAM deployment would pass
+`OciGroupPrincipal("<group>")` instead.
+
+At runtime the identity travels with the call, not with a session variable:
+
+```python
+ctx = oracledb.create_end_user_security_context(
+    end_user_identity=("ANALYST_EAST", key),
+    database_access_token=token,
+)
+with OracleMemoryEndUserSecurityContext(ctx):
+    thread.add_messages(messages)          # the kernel filters the memory rows
+```
+
+`db/deep_security.py` owns all of this in the workshop: `probe()` now reports `oamp=<version>` and
+`memory_deep_sec`, `install_memory_policies()` / `list_memory_policies()` drive the admin API and
+return a report, and `memory_end_user_context(ctx)` is the runtime wrapper.
+`scripts/setup_deep_security.py` runs the install as part of its enforcement step and prints the
+result under `--demo`.
+
+### What changed in the workshop
+
+- **The floor is `oracleagentmemory>=26.8`** (was `>=26.4`) in both `requirements.txt` files.
+- **The OAMP client now uses `memory_store_id="EDA_ONNX"`** instead of the deprecated
+  `table_name_prefix="eda_onnx_"`. The two resolve to the same `EDA_ONNX_*` tables, so existing
+  memories survive the upgrade; the prefix form is removed in OAMP 27.1.
+- **Part 8 enforcement covers two stores**: `FINANCE` (data grants, or VPD on Free) and the OAMP
+  memory store (OAMP-managed data grants).
+- **Deep Sec end users are unquoted local identifiers** (`ANALYST_EAST`, not the quoted UPN form).
+  `LocalEndUserPrincipal` in OAMP 26.8.0 requires a valid unquoted Oracle identifier; a UPN belongs
+  in the external-authenticator clause, and OCI IAM deployments grant to `OciGroupPrincipal` instead.
+
+### On the shipped Free container
+
+The OAMP policies compile to `CREATE DATA ROLE` / `CREATE DATA GRANT` — exactly the statements 26ai
+Free rejects with `ORA-00901` — so the installer reports the skip instead of pretending the memory
+layer is protected:
+
+```
+  [memory] skipped AGENT.EDA_ONNX: backend=VPD has no data roles/data grants (OAMP memory policies require Deep Sec).
+```
+
+Nothing else changes on Free: thread scoping, provenance tags, and the harness's
+`(user, agent, thread)` model remain the application-level boundary, and the fail-open caveat above
+applies to them just as it does to `FINANCE`.
+
 ## Running it on a database that has Deep Sec
 
 ```bash
@@ -227,13 +331,17 @@ cd app && python scripts/setup_deep_security.py --ddl-only
 ```
 
 This writes `app/scripts/out/deep_sec_ddl.sql` — 67 statements generated from the same persona
-registry: 6 data roles, 6 quoted end users, 12 role grants (end user + application identity), 42 row
-and column data grants, and the application identity itself. Reviewed by hand, that file is the
-migration.
+registry: 6 data roles, 6 unquoted local end users, 12 role grants (end user + application identity), 42 row
+and column data grants, and the application identity itself. The file ends with the OAMP
+memory-store policy sketch, because those roles and grants are created through the SDK, not by
+this DDL. Reviewed by hand, the file is the migration.
 
 > **Verification status.** The generated Deep Sec DDL is produced from the live schema but has **not**
 > been executed, because no 26ai Enterprise-class instance is available to this repo. Everything in the
-> `VPD` column of the tables above was executed and verified against the live container.
+> `VPD` column of the tables above was executed and verified against the live container. The OAMP
+> memory-policy path is gated the same way: the SDK call shapes (`add_deep_data_security_policies`,
+> `grant_agent_memory_policies`, `OracleMemoryEndUserSecurityContext`) are verified against
+> `oracleagentmemory` 26.8.0, and the Free-edition skip path is executed end to end.
 
 ## The file that generates this section
 
@@ -254,10 +362,15 @@ a rebuild.
 1. Run `setup_deep_security.py --ddl-only` and review `deep_sec_ddl.sql`.
 2. Register the database as an OAuth resource in OCI IAM or Entra ID; register the agent as an OAuth
    client with a client-credentials grant.
-3. Execute the DDL on the target; adjust end-user names to your IAM principal identifiers (UPNs).
+3. Execute the DDL on the target. End users are unquoted local identifiers; for OCI IAM/UPN
+   identities, keep the UPN as the external-authenticator name and grant the OAMP memory policies to
+   `OciGroupPrincipal`s instead of `LocalEndUserPrincipal`s.
 4. Replace the `VPD` backend in `db/deep_security.py::set_identity` by attaching an
    `EndUserSecurityContext` per request. The persona-to-data-role mapping is already there.
-5. Add an audit of which sessions set a context, then remove the Python post-filters — they should be
+5. Install the OAMP memory-store policies on the target (`install_memory_policies()`, or just re-run
+   `setup_deep_security.py` there) and wrap runtime memory calls in
+   `memory_end_user_context(ctx)` / `OracleMemoryEndUserSecurityContext`.
+6. Add an audit of which sessions set a context, then remove the Python post-filters — they should be
    redundant.
-6. Prefer `ORA_IS_COLUMN_AUTHORIZED` over a blank cell in the UI, so a masked value renders as a
+7. Prefer `ORA_IS_COLUMN_AUTHORIZED` over a blank cell in the UI, so a masked value renders as a
    deliberate mask rather than an empty field.
