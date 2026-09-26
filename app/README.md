@@ -5,7 +5,7 @@ A chat UI for the agent harness built in `enterprise_data_agent.ipynb`. Same har
 ![Chat with agent-driven globe control and live token usage](images/chat-globe-control.png)
 *Asking the agent to fly the globe to a branch and report the flagged activity around it. Left rail: thread list. Centre: the assistant's grounded answer with a "show 44 step trace" link. Right pane: live `Token usage` meter (last-turn prompt vs. model-max), system prompt, recent thread messages, top semantic memories, episodic memories, recent tool outputs, DBFS scratchpad, skill manifest, tool manifest — all scoped to the active thread.*
 
-**Demo domain:** Meridian Bank, a global retail bank. The `FINANCE` schema models 25 branches (with `SDO_GEOMETRY` lat/long) and 40 merchants across four regions (AMERICAS / EUROPE / MIDDLE_EAST / ASIA_PACIFIC), ~200 customers, ~250 accounts, ~285 cards, ~1,200 transactions over the last 90 days — including deliberately seeded AML patterns (structuring, geographic velocity, high-risk-corridor wires, rapid cash-out, large cash deposits) — plus 60 loans and 15 Suspicious Activity Reports. The agent answers questions over all of it via SQL, spatial queries (`SDO_WITHIN_DISTANCE`), in-database compute (Oracle MLE), JSON Relational Duality Views, and identity-aware row/column filtering (DDS / DBMS_RLS).
+**Demo domain:** Meridian Bank, a global retail bank. The `FINANCE` schema models 60 branches (with `SDO_GEOMETRY` lat/long) and 140 merchants across four regions (AMERICAS / EUROPE / MIDDLE_EAST / ASIA_PACIFIC), 2,000 customers, 2,650 accounts, ~3,000 cards, ~23,600 transactions over the last 90 days — including deliberately seeded AML patterns (structuring, geographic velocity, high-risk-corridor wires, rapid cash-out, large cash deposits) — plus 900 loans and 117 Suspicious Activity Reports. The AML desk's paperwork lives beside it: sanctions screenings, beneficial owners, wire messages, login events (with `SDO_GEOMETRY` locations), KYC documents, case notes and FX rates. The agent answers questions over all of it via SQL, spatial queries (`SDO_WITHIN_DISTANCE`), in-database compute (Oracle MLE), JSON Relational Duality Views, and identity-aware row/column filtering (DDS / DBMS_RLS).
 
 ## What this application teaches
 
@@ -236,7 +236,7 @@ python scripts/seed.py
 
 Populates the demo data on top of the bootstrap:
 
-- Drops + recreates the `FINANCE` schema (25 branches + 40 merchants with `SDO_GEOMETRY`, ~200 customers, ~250 accounts, ~285 cards, ~1,200 transactions incl. AML patterns, 60 loans, 15 SAR reports)
+- Drops + recreates the `FINANCE` schema (60 branches + 140 merchants with `SDO_GEOMETRY`, 2,000 customers, 2,650 accounts, ~3,000 cards, ~23,600 transactions incl. AML patterns, 900 loans, 117 SAR reports, + the AML operational tables) and gathers optimizer statistics
 - Creates `account_dv` and `customer_dv` JSON Relational Duality Views
 - Scans the schema into OAMP institutional knowledge
 - Ingests `oracle/skills` into the skillbox (~155 markdown skills)

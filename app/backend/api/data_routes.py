@@ -37,6 +37,10 @@ TABLE_ALLOWLIST: dict[str, list[str]] = {
     DEMO_USER.upper(): [
         "BRANCHES", "CUSTOMERS", "ACCOUNTS", "CARDS",
         "MERCHANTS", "TRANSACTIONS", "LOANS", "SAR_REPORTS",
+        # The AML desk's operational tables — same schema, same treatment:
+        # browsable in the explorer, subject to the same identity rules.
+        "SANCTIONS_SCREENINGS", "BENEFICIAL_OWNERS", "WIRE_MESSAGES",
+        "LOGIN_EVENTS", "KYC_DOCUMENTS", "CASE_NOTES", "FX_RATES",
     ],
     AGENT_USER.upper(): [
         "TOOLBOX", "SKILLBOX", "SCHEMA_ACL", "AGENT_AUTHORIZATIONS",

@@ -25,25 +25,37 @@ class Fact:
 
 
 def _hash_body(body: str) -> str:
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+    # 32 hex chars, matching the notebook's `_hash()` and agent/skills.py. A
+    # different truncation here would make every fact look changed to the other
+    # writer, so a Codespace (app scan at seed time) followed by the notebook's
+    # §2.5 scan would re-embed the whole schema instead of skipping it.
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:32]
 
 
 def _scan_tables(conn, owner: str) -> list[Fact]:
     facts: list[Fact] = []
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT t.table_name, c.comments "
+            "SELECT t.table_name, c.comments, t.num_rows, t.last_analyzed "
             "  FROM all_tables t "
             "  LEFT JOIN all_tab_comments c "
             "         ON c.owner = t.owner AND c.table_name = t.table_name "
             " WHERE t.owner = :o ORDER BY t.table_name",
             o=owner.upper(),
         )
-        for table, comment in cur:
+        for table, comment, num_rows, last_analyzed in cur:
             subj = f"{owner}.{table}"
-            body = f"Table {subj}."
+            # The body format is a contract with the notebook's §5.2 scanner
+            # (docs/part-2-oamp-memory.md): identical text means a notebook
+            # re-scan hash-skips instead of re-embedding every fact.
+            body_parts = [f"Table {subj}."]
             if comment:
-                body += f" Documented purpose: {comment}"
+                body_parts.append(f"Documented purpose: {comment}")
+            if num_rows is not None:
+                body_parts.append(f"Approximate row count: {num_rows:,}.")
+            if last_analyzed:
+                body_parts.append(f"Statistics last gathered at {last_analyzed}.")
+            body = " ".join(body_parts)
             facts.append(Fact("table", subj, body, {"owner": owner, "table": table}))
     return facts
 
@@ -95,9 +107,10 @@ def _scan_relationships(conn, owner: str) -> list[Fact]:
         )
         for cn, t, c, rt, rc in cur:
             subj = f"{owner}.{t}.{c}->{owner}.{rt}.{rc}"
+            # Same body contract as the notebook scanner (see _scan_tables).
             body = (
-                f"{owner}.{t}.{c} references {owner}.{rt}.{rc} "
-                f"(constraint {cn}). Use this column for joins between the two tables."
+                f"Foreign key {cn}: {owner}.{t}.{c} references {owner}.{rt}.{rc}. "
+                f"Use this edge when joining the two tables."
             )
             facts.append(Fact(
                 "relationship", subj, body,

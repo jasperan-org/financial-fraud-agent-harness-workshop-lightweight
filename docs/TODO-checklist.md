@@ -1,6 +1,6 @@
 # Workshop TODO checklist
 
-The canonical workshop is the nine-TODO path in `notebook_student.ipynb`. Each checkpoint is an assertion in the notebook: most sit in the cell right after their TODO, and a few run later in the same section so the data they need (registered tools, seeded skills) exists first. A failure identifies the unfinished block before later work depends on it.
+The canonical workshop is the nine-TODO path in `notebook_student.ipynb`, followed by the **Part 12 capstone** (autonomous AML triage — no TODO; it runs the harness you built). Each checkpoint is an assertion in the notebook: most sit in the cell right after their TODO, and a few run later in the same section so the data they need (registered tools, seeded skills) exists first. A failure identifies the unfinished block before later work depends on it.
 
 - [ ] **TODO 1 — ask the bare model** in Part 1. Set `QUESTION` and run the chat client with no memory, retrieval, or tools.
 - [ ] **TODO 2 — `OracleONNXEmbedder.embed`** in Part 2. Embed text with the in-database ONNX model, one `VECTOR_EMBEDDING` SELECT per text.
@@ -16,6 +16,8 @@ There is no tenth TODO for identity. The rule set is installed for you by `app/s
 
 ## Before you start
 
+- [ ] **§0.1 in the notebook: kernel self-check.** Green print = you are on the Python 3.11 workshop kernel and the notebook can see the repository.
+- [ ] **§1.3 in the notebook: database preflight.** Green on FINANCE, the ONNX embedder, and the LLM key. Every red row prints its own fix command; the cell stops you if `FINANCE` or the embedder is missing.
 - [ ] Codespace or local Oracle is reachable.
 - [ ] `ALL_MINILM_L12_V2` is available in the database (and `RERANKER_ONNX` if the cross-encoder step is provisioned).
 - [ ] The `FINANCE` schema is seeded (see `app/scripts/seed.py`).
@@ -31,6 +33,21 @@ There is no tenth TODO for identity. The rule set is installed for you by `app/s
 - [ ] Switch the header persona to **Analyst — Europe & Middle East** and re-ask; watch the rows change.
 - [ ] Open the memory pane and confirm the correction from turn 3 is there.
 - [ ] Switch the header persona to **Compliance Officer** and ask for Suspicious Activity Reports: **15** rows. Switch to **Analyst (default)** and ask the same thing: **0** rows. Nothing in the UI changed — the database answered differently.
+
+## The capstone — Part 12, autonomy
+
+No TODO here: Part 12 runs the harness you just built as an AML triage desk. Work it in order.
+
+- [ ] §12.2 — read the ledger DDL. `AGENT.AML_TRIAGE` is the structured decision record (one row per `(customer, typology)`); the harness owns it, never `FINANCE`.
+- [ ] §12.3 — build the alert queue. Expect **15 alerts** across the five typologies; `TRIAGE_LIMIT = 3` works the top three.
+- [ ] §12.4 — read one evidence pack line by line. That is everything the model will see.
+- [ ] §12.5 — read the policy and the validator. Unknown decisions become `REVIEW_REQUIRED`; unknown reason codes fall back to the alert's typology.
+- [ ] §12.7 — run the triage. Watch the tool trace, then read the ledger rows.
+- [ ] §12.8 — read the impact board. The only assumption is `MANUAL_MINUTES_PER_ALERT`; everything else is computed from the database.
+- [ ] §12.9 — ask the agent about its own morning. The answer comes from `case_decision` memories, not fresh SQL.
+- [ ] §12.10 — decide what you would schedule. Set `IGNORE_WATERMARK = False` and re-run §12.3: a real morning job reports **0 new alerts** rather than re-triaging the book.
+
+Guide: [Part 12 — Autonomous AML triage](part-12-autonomous-aml-triage.md).
 
 ## Advanced reference material
 

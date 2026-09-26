@@ -155,6 +155,49 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 ---
 
+### `Run All` stops at the first TODO (red cell)
+
+**Symptom:** You run the whole notebook and it halts early with a red cell, usually `TODO 1` or a `NotImplementedError`.
+
+**Cause:** That is the workshop. The eight TODO stubs raise on purpose and every TODO has a hard-stop assert below it, so you cannot barrel forward with a half-built harness.
+
+**Fix:** Work top to bottom and implement each TODO in place; or open `notebook_complete.ipynb`, which is the same notebook with all nine solved. Nothing is broken and no state is corrupted by stopping there.
+
+---
+
+### The notebook's first cell says the kernel is missing `oracledb` / `numpy` / `openai` / `oracleagentmemory`
+
+**Symptom:** `§0.1` raises `This kernel is missing: ...`.
+
+**Cause:** VS Code picked a different Python interpreter than the workshop one.
+
+**Fix:** Command Palette → **Notebook: Select Notebook Kernel** → **Python 3.11** (`/usr/local/bin/python`). The dependencies are pre-installed for that interpreter — do not `pip install`. See `images/select_kernel.png`.
+
+---
+
+### `§1.3` preflight is red
+
+**Symptom:** The preflight table prints one or more ❌ rows.
+
+**Cause / Fix:** Each red row prints its own remedy:
+
+- *FINANCE tables / transactions / SAR reports* → the seed did not finish: `cd app && python scripts/bootstrap.py && python scripts/seed.py`.
+- *ONNX embedder missing* → `cd app && python scripts/bootstrap.py` (needs the `vector_memory_size` pool from the same script).
+- *credentials: 0 key(s)* → no OCI GenAI key was injected; add it as a Codespaces secret (then restart) or `echo 'OCI_GENAI_API_KEY=...' >> app/.env`.
+- *Oracle Text index absent* → informational: `§3.3a` creates it before the keyword leg needs it.
+
+The cell hard-fails only on a seeded `FINANCE` and a present embedder, because every later block depends on those two.
+
+---
+
+### Part 12 (`Autonomous AML triage`) issues
+
+**Symptom:** `0 alert(s)` in the queue, `REVIEW_REQUIRED` rows, or every alert failing with a stub error.
+
+**Fix:** See the troubleshooting section of [Part 12 — Autonomous AML triage](part-12-autonomous-aml-triage.md#troubleshooting). The short version: `0 alerts` means the watermark already covers the window (`IGNORE_WATERMARK = True` re-triages it); `REVIEW_REQUIRED` is the intended fallback when a model reply does not validate; a stub error means a TODO above is still unimplemented.
+
+---
+
 ## OAMP / Memory Issues
 
 ### `ValueError: user already exists` (or agent already exists)

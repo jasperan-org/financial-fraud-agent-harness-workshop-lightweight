@@ -1,6 +1,6 @@
 # Financial Fraud Agent Harness Workshop — Lightweight
 
-**Build a memory-aware AML / financial-crime data agent on Oracle AI Database 26ai in 90 minutes — then see the same harness running as a Flask + React app.**
+**Build a memory-aware AML / financial-crime data agent on Oracle AI Database 26ai in 90 minutes — then let it work the bank's fraud queue on its own, and see the same harness running as a Flask + React app.**
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jasperan-org/financial-fraud-agent-harness-workshop-lightweight)
 
@@ -10,11 +10,13 @@
 
 > **From notebook concept to a running app.** The Codespace already has the *same* harness running as a Flask + React application on the *same* Oracle — open it at [http://localhost:3000](http://localhost:3000) and watch the concept you are coding become a live product. The notebook teaches the pattern; the app shows it deployed.
 
-This repository has two deliberately different learning surfaces:
+This repository has three deliberately different learning surfaces:
 
 1. **The 90-minute notebook** — [`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives with **nine hands-on TODOs**. A bare-model baseline, the in-database embedder, memory scanning, semantic and hybrid retrieval, vector-indexed tool and skill lookup, a safe SQL tool, context engineering, and the bounded `agent_turn` loop. The answer key is [`notebook_complete.ipynb`](notebook_complete.ipynb); the reference notebook [`enterprise_data_agent.ipynb`](enterprise_data_agent.ipynb) goes further, with a **Part 8** on identity-aware data access.
 
 2. **The running app** — [`app/`](app/) is the **Meridian Bank AML app**: a Flask + Socket.IO backend and a React + Vite front end against the *same* Oracle, the *same* OAMP store, and the *same* `toolbox` / `skillbox` the notebook populates. Chat on the left; live memory pane on the right; an identity selector in the header; a 3D globe the agent can drive.
+
+3. **The capstone: a triage desk that decides** — notebook **Part 12** stops taking questions and works a queue. The harness builds Meridian Bank's AML alert queue from `FINANCE`, assembles an evidence pack per alert, decides `ESCALATE` / `KYC_REVIEW` / `DISMISS` with a confidence and a written rationale, records every decision in `AGENT.AML_TRIAGE` **and** in OAMP memory, and reports what the run was worth to the bank — with exactly one labelled assumption in the arithmetic. Guide: [`docs/part-12-autonomous-aml-triage.md`](docs/part-12-autonomous-aml-triage.md).
 
 Every "true setup" task — `AGENT` user creation, `vector_memory_size` / `pga_aggregate_limit`, the in-database ONNX embedder and reranker, the `FINANCE` seed, duality views, Oracle Text, identity rules — is run by the Codespace **before** you open the notebook (`app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, `setup_deep_security.py`). Each TODO has a hard-stop assert below it so a broken implementation surfaces immediately.
 
@@ -22,7 +24,7 @@ Every "true setup" task — `AGENT` user creation, `vector_memory_size` / `pga_a
 
 ## The use case: Meridian Bank / fraud detection
 
-The demo is a fictional global retail bank: **25 branches** and **40 merchants** across four regions (AMERICAS, EUROPE, MIDDLE_EAST, ASIA_PACIFIC), ~200 customers, ~250 accounts, ~285 cards, ~1,200 transactions over 90 days, 60 loans, and **15 Suspicious Activity Reports**.
+The demo is a fictional global retail bank: **60 branches** and **140 merchants** across four regions (AMERICAS, EUROPE, MIDDLE_EAST, ASIA_PACIFIC), **2,000 customers**, **2,650 accounts**, ~3,000 cards, ~23,600 transactions over 90 days, **900 loans**, **117 Suspicious Activity Reports**, plus the operational tables an AML desk works from (**sanctions screenings**, **beneficial owners**, **wire messages**, **login events**, **KYC documents**, **case notes**, **FX rates**).
 
 A slice of the transactions is deliberately suspicious, and `transactions.flag_reason` records *which AML rule fired*:
 
@@ -45,6 +47,7 @@ That flag column is the fraud use case: it turns "query the bank database" into 
 | 3 | Semantic, reranked, and hybrid vector + Oracle Text retrieval | **TODO 4** — `retrieve_knowledge`; **TODO 5** — `hybrid_rrf_search_memories` |
 | 4 | Vector-indexed toolbox and skillbox | **TODO 6** — `retrieve_tools`; **TODO 7** — `tool_run_sql`; **TODO 8** — `tool_list_skills` |
 | 5 | Context engineering and the bounded agent loop | **TODO 9** — `agent_turn` |
+| Capstone | Autonomous AML triage — Meridian Bank's morning queue | *(no TODO — run it)* **Part 12** — queue → evidence → decision → ledger → impact board |
 
 Every TODO has a hard-stop assertion immediately below it. Use the [TODO checklist](docs/TODO-checklist.md) and the matching guides in [`docs/`](docs/) as you work:
 
@@ -60,6 +63,7 @@ Every TODO has a hard-stop assertion immediately below it. Use the [TODO checkli
 | 8 | Identity-aware data access — FINANCE + OAMP memory *(advanced reference)* | [Part 8](docs/part-8-deep-data-security.md) | — |
 | 9 | JSON Relational Duality Views *(advanced reference)* | [Part 9](docs/part-9-duality-views.md) | — |
 | 11 | Tool-output offload *(advanced reference)* | [Part 11](docs/part-11-tool-output-offload.md) | — |
+| 12 | **Autonomous AML triage** — the bank's morning *(capstone)* | [Part 12](docs/part-12-autonomous-aml-triage.md) | — *(run-only; exercises TODOs 1–9)* |
 
 ## Start in GitHub Codespaces
 
@@ -70,7 +74,7 @@ Every TODO has a hard-stop assertion immediately below it. Use the [TODO checkli
    ![Codespace startup](images/codespace_startup.png)
 
 4. Add your `OCI_GENAI_API_KEY` as a Codespaces secret (or drop it into `app/.env`). The notebook rotates across `OCI_GENAI_API_KEY` + `OCI_GENAI_API_KEY_2..6` and prompts as a last resort; the app reads `app/.env`.
-5. Open [`notebook_student.ipynb`](notebook_student.ipynb) with the **Python 3.11** kernel and run cells from the top.
+5. Open [`notebook_student.ipynb`](notebook_student.ipynb) with the **Python 3.11** kernel and run cells from the top. The notebook's first cells walk you through this — kernel, run order, time budget, and what to do when a cell goes red.
 
    ![Select Kernel](images/select_kernel.png)
 
@@ -80,6 +84,11 @@ Every TODO has a hard-stop assertion immediately below it. Use the [TODO checkli
    docker ps    # oracle-free should show (healthy)
    ```
 
+**Two things that surprise first-time runners:**
+
+- **`Run All` halts in `notebook_student.ipynb` — by design.** The eight TODO stubs raise and each TODO has a hard-stop assert below it. That is the workshop. To watch a full clean run, open [`notebook_complete.ipynb`](notebook_complete.ipynb).
+- **Run cells in order, top to bottom.** §1.3 preflights the database and stops with the exact fix command if anything is missing, so a broken environment surfaces in row 4 instead of in the middle of an agent turn.
+
 Useful recovery commands inside the Codespace:
 
 ```bash
@@ -88,6 +97,21 @@ curl http://localhost:8000/api/health
 tail -60 .devcontainer/logs/backend.log
 tail -40 .devcontainer/logs/frontend.log
 ```
+
+### Notebook usability — what is built in
+
+The lightweight notebooks are written for a Codespace you have never opened before:
+
+| Affordance | Where | What it does |
+|---|---|---|
+| **Start-here orientation** | first cell | Kernel, run order, `Run All` semantics, a per-section time budget, terminal recovery commands, and a first-run-symptom → fix table |
+| **Contents** | second cell | Anchor links to every part, so you can jump to TODO 6 without scrolling 4,000 lines |
+| **Kernel self-check** | §0.1 | Fails with the kernel picker instructions instead of `ModuleNotFoundError`, and prints the forwarded `*.app.github.dev` URL for the running app |
+| **Database preflight** | §1.3 | A dozen checks (FINANCE seed, ONNX embedder, Oracle Text index, skillbox/toolbox, API keys) with the exact remediation command per red row; hard-fails only on the two requirements the rest of the notebook cannot survive |
+| **Hard-stop checkpoints** | after every TODO | 8 asserts that name the TODO that is still broken |
+| **Idempotent everything** | throughout | Memory facts upsert on `(kind, subject)` + body hash, the triage ledger upserts on `(customer, typology)`, `FINANCE` is never written — re-running from a restarted Codespace is safe |
+| **Degrade, don't die** | Part 12 | A failed alert is recorded and the run continues; an unparseable model reply becomes `REVIEW_REQUIRED` instead of an exception |
+| **Observability** | throughout | Every intermediate the model sees is printed — the evidence pack, the decision rationale, the ledger, the cost in model calls and tokens |
 
 ## Run locally
 
@@ -146,6 +170,8 @@ Open [http://localhost:3000](http://localhost:3000). Starter prompts that exerci
 
 The right-hand pane fills in after every turn — top semantic memories, recent tool outputs, skill manifest, token usage. Switch the header persona (`agent`, `cfo`, `analyst.east`, `analyst.west`, `compliance.officer`) and the same SQL returns different rows: as `agent` the SAR reports query returns nothing, as `compliance.officer` it returns 15 rows, with no application-layer filtering on the path.
 
+> **After you run notebook Part 12**, the app can read the triage ledger the notebook wrote. Ask it *"What did the AML triage desk decide, and what is under review?"* — `run_sql` reads `AGENT.AML_TRIAGE`, the same rows the impact board summarised. It lives in `AGENT` (harness state, beside the memory tables), so it is not persona-filtered — `FINANCE` is.
+
 For the full app documentation, see [`app/README.md`](app/README.md).
 
 ## Workshop files
@@ -158,12 +184,13 @@ financial-fraud-agent-harness-workshop-lightweight/
 │   ├── setup_build.sh              pip + npm installs
 │   ├── setup_runtime.sh            Oracle + bootstrap + seed + setup_advanced
 │   └── start_app.sh                Flask backend + Vite front end
-├── notebook_student.ipynb          The 90-minute path — eight TODO stubs + TODO 1 prompt + asserts
+├── notebook_student.ipynb          The 90-minute path — eight TODO stubs + TODO 1 prompt + asserts + the Part 12 capstone
 ├── notebook_complete.ipynb         The nine TODOs, solved
 ├── notebook_complete_with_setup_code.ipynb   Full source including every Oracle DDL
 ├── enterprise_data_agent.ipynb     Original end-to-end source notebook
 ├── docs/
 │   ├── part-1-setup.md … part-11-tool-output-offload.md
+│   ├── part-12-autonomous-aml-triage.md      The capstone guide (Part 12)
 │   ├── TODO-checklist.md
 │   ├── fraud-detection-onepager.md
 │   └── troubleshooting.md
@@ -177,6 +204,7 @@ financial-fraud-agent-harness-workshop-lightweight/
 ├── oci_key_rotation.py             Shared OCI key rotation for the notebook and app
 ├── scripts/
 │   ├── build_student_notebook.py   Notebook integrity check
+│   ├── insert_autonomy_section.py  Regenerates the Codespaces orientation + Part 12 cells (idempotent)
 │   └── insert_part8_section.py     Regenerates notebook Part 8 (idempotent)
 └── requirements.txt                Notebook dependencies
 ```
@@ -206,6 +234,7 @@ The harness you build:
 - Embeds and retrieves with in-database SQL (`VECTOR_EMBEDDING`, `PREDICTION`, `CONTAINS`).
 - Dispatches tools registered with a single decorator that introspects the function and writes a vector-indexed row.
 - Runs the loop in ~90 lines of Python.
+- **Decides** (Part 12): an AML alert queue arrives from `FINANCE`, the harness assembles the evidence, the model picks `ESCALATE` / `KYC_REVIEW` / `DISMISS`, and the harness validates it, records it (`AGENT.AML_TRIAGE` + OAMP memory), and reports the business impact. Autonomy is the same loop with a **trigger, a record, and a budget**. See [`docs/part-12-autonomous-aml-triage.md`](docs/part-12-autonomous-aml-triage.md).
 
 The app proves it: those same lines drive a real chat UI against the same Oracle, with end-user identity persona gates, a live memory pane, and a globe the agent can drive.
 

@@ -516,8 +516,11 @@ for pid, p in PERSONAS.items():
           f"{','.join(regions):<20} {amount:>9} {sar_rows:>5}")
 clear_persona()
 
+with finance_conn.cursor() as cur:
+    cur.execute("SELECT COUNT(*) FROM TRANSACTIONS")
+    total_txns = cur.fetchone()[0]
 print("-" * 78)
-print("The full table holds 1,199 transactions across 4 regions.")
+print(f"The full table holds {total_txns:,} transactions across 4 regions.")
 print("'NULL' = the row came back, the value did not. A mask, not an absence.")
 print("SAR reports are 0 for everyone except compliance.officer (default-deny).")
 '''

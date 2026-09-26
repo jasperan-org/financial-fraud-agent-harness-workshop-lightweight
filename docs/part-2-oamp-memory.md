@@ -109,7 +109,7 @@ SELECT t.table_name, tc.comments, t.num_rows, t.last_analyzed
 
 **For each row**, build a natural-language `body` that the embedder can index:
 
-> `"Table FINANCE.TRANSACTIONS. Documented purpose: Card/account transactions. Approximate row count: 1200. Statistics last gathered at 2026-05-09 12:34:00."`
+> `"Table FINANCE.TRANSACTIONS. Documented purpose: Card/account transactions. Approximate row count: 23606. Statistics last gathered at 2026-05-09 12:34:00."`
 
 Concatenate the parts conditionally — skip the comment line if there's no comment, skip the row count if `num_rows` is `None`, etc.
 
@@ -164,6 +164,12 @@ After the four scanners run, the pre-built `write_facts()` function:
 6. **After the facts are written** — `link_schema_facts()` connects them: every column fact and relationship fact links to its table fact with `supports`.
 
 The hash check is what makes hourly re-scans free. The vast majority of calls hash-check and skip; only schema changes trigger an embed.
+
+> **First run on a fresh seed takes a couple of minutes.** The Meridian Bank schema has 15 tables,
+> ~120 columns and their relationships, so the first scan writes ~160 memories — and each new
+> memory is an embed plus an extraction round-trip. Re-runs are seconds, because every body hash
+> matches and the loop skips the expensive path. (The `FINANCE` world is deliberately wide: fifteen
+> tables, not three, is what makes "which table holds this?" a real retrieval problem.)
 
 ## Relations and Links (OAMP >= 26.8)
 

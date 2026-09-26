@@ -78,6 +78,14 @@ agent_conn = connect(AGENT_USER, AGENT_PASS, SYS_DSN)
 
 The `connect` helper retries because a Docker healthcheck can pass before Oracle's listener is ready to accept application sessions. After the connection succeeds, Part 2 creates the OAMP client and starts scanning `FINANCE` catalog metadata.
 
+### §1.3 Preflight — run it before anything else
+
+Right after the connection cell, the notebook runs a **preflight**: a dozen fast queries against the same catalogs the scanner will read, plus the LLM credentials. It reports FINANCE's tables and the AML rows in the seed, the in-database ONNX embedder and reranker, the OAMP memory table, the Oracle Text index, `toolbox` / `skillbox`, and the API keys.
+
+Each ❌ row prints the command that fixes it (`cd app && python scripts/bootstrap.py && python scripts/seed.py` for a missing seed, the Codespaces-secret instructions for a missing key). Only two failures stop the notebook — no `FINANCE`, no embedder — because everything from Part 2 on depends on those. If the preflight is green, the rest of the workshop has what it needs.
+
+The preflight takes the §1.3 slot; the chat-client section that follows is §1.4.
+
 If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, and `setup_advanced.py`, or open [`notebook_complete_with_setup_code.ipynb`](../notebook_complete_with_setup_code.ipynb) — the full source that includes every DDL statement.
 
 ## TODO 1: Talk to the bare model

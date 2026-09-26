@@ -175,12 +175,12 @@ cd app && python scripts/setup_deep_security.py --demo
 ```
 persona              clearance  transactions regions              amount  SAR rows   balance
 --------------------------------------------------------------------------------------------
-agent                STANDARD           1199 AMER,APAC,EU,ME        NULL         0      NULL
-cfo                  EXECUTIVE          1199 AMER,APAC,EU,ME     visible         0   visible
-compliance.officer   EXECUTIVE          1199 AMER,APAC,EU,ME     visible        15   visible
-analyst.east         STANDARD            553 EU,ME                  NULL         0      NULL
-analyst.west         STANDARD            646 AMER,APAC              NULL         0      NULL
-ops.viewer           STANDARD           1199 AMER,APAC,EU,ME        NULL         0      NULL
+agent                STANDARD          23606 AMER,APAC,EU,ME        NULL         0      NULL
+cfo                  EXECUTIVE         23606 AMER,APAC,EU,ME     visible         0   visible
+compliance.officer   EXECUTIVE         23606 AMER,APAC,EU,ME     visible       117   visible
+analyst.east         STANDARD           9697 EU,ME                  NULL         0      NULL
+analyst.west         STANDARD          13909 AMER,APAC              NULL         0      NULL
+ops.viewer           STANDARD          23606 AMER,APAC,EU,ME        NULL         0      NULL
 --------------------------------------------------------------------------------------------
 NULL means masked, not empty: the row came back, the value did not.
 SAR rows = 0 for every persona except compliance.officer (default-deny).
@@ -198,12 +198,12 @@ The full matrix — every table × every persona — with an independent check:
 
 | persona | transactions | branches | merchants | accounts | loans | cards | customers | SAR |
 |---|---|---|---|---|---|---|---|---|
-| agent | 1199 | 25 | 40 | 250 | 60 | 286 | 200 | 0 |
-| cfo | 1199 | 25 | 40 | 250 | 60 | 286 | 200 | 0 |
-| compliance.officer | 1199 | 25 | 40 | 250 | 60 | 286 | 200 | **15** |
-| analyst.east | 553 | 11 | 16 | 120 | 31 | 139 | 111 | 0 |
-| analyst.west | 646 | 14 | 24 | 130 | 29 | 147 | 114 | 0 |
-| ops.viewer | 1199 | 25 | 40 | 250 | 60 | 286 | **0** | 0 |
+| agent | 23,606 | 60 | 140 | 2,650 | 900 | 2,984 | 2,000 | 0 |
+| cfo | 23,606 | 60 | 140 | 2,650 | 900 | 2,984 | 2,000 | 0 |
+| compliance.officer | 23,606 | 60 | 140 | 2,650 | 900 | 2,984 | 2,000 | **117** |
+| analyst.east | 9,697 | 25 | 56 | 1,102 | 350 | 1,228 | 987 | 0 |
+| analyst.west | 13,909 | 35 | 84 | 1,548 | 550 | 1,756 | 1,294 | 0 |
+| ops.viewer | 23,606 | 60 | 140 | 2,650 | 900 | 2,984 | **0** | 0 |
 
 ## Where it is wired into the app
 

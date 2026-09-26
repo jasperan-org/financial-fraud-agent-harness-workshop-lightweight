@@ -13,17 +13,24 @@ Both run server-side. No round-trips to a separate vector DB. No Python embedder
 
 ## The FINANCE Demo Schema
 
-The pre-built setup cell creates a `FINANCE` schema with eight tables and realistic data:
+The pre-built setup cell creates a `FINANCE` schema with fifteen tables and realistic data:
 
 | Table | Rows (approx) | What it represents |
 |---|---|---|
-| `branches` | 25 | Bank branches with `SDO_GEOMETRY` location |
-| `merchants` | 40 | Merchants where card transactions occur, with `SDO_GEOMETRY` location |
-| `customers` | 200 | Bank customers with a 1-100 `risk_rating` |
-| `accounts` | 250 | Checking / savings / money-market / credit-line accounts |
-| `cards` | ~285 | Debit / credit / prepaid cards |
-| `transactions` | ~1,200 | Card/account transactions incl. seeded AML patterns |
-| `loans` + `sar_reports` | 60 + 15 | Loans; Suspicious Activity Reports (compliance-only) |
+| `branches` | 60 | Bank branches with `SDO_GEOMETRY` location |
+| `merchants` | 140 | Merchants where card transactions occur, with `SDO_GEOMETRY` location |
+| `customers` | 2,000 | Bank customers with a 1-100 `risk_rating` |
+| `accounts` | 2,650 | Checking / savings / money-market / credit-line accounts |
+| `cards` | ~3,000 | Debit / credit / prepaid cards |
+| `transactions` | ~23,600 | Card/account transactions incl. seeded AML patterns |
+| `loans` + `sar_reports` | 900 + 117 | Loans; Suspicious Activity Reports (compliance-only) |
+| `sanctions_screenings` | 431 | Watchlist (OFAC / EU / UN / PEP / adverse-media) name matches with a disposition |
+| `beneficial_owners` | 1,206 | Who ultimately owns each SME/CORP customer, per ownership layer |
+| `wire_messages` | 1,320 | SWIFT-style detail behind wire transactions (BICs, purpose code) |
+| `login_events` | ~7,000 | Digital-banking logins with `SDO_GEOMETRY` location (impossible-travel evidence) |
+| `kyc_documents` | ~3,000 | Due-diligence paperwork with expiry dates (the remediation backlog) |
+| `case_notes` | ~250 | Investigator narrative behind the SARs |
+| `fx_rates` | 630 | Daily USD rates per currency |
 
 Two columns are intentionally surprising — these are exactly the kind of facts a senior engineer remembers and an LLM hallucinates:
 
