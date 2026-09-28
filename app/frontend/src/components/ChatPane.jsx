@@ -13,7 +13,7 @@ export default function ChatPane({ chat, identity }) {
   }, [chat.messages, chat.trace]);
 
   return (
-    <main className="flex-1 flex flex-col overflow-hidden">
+    <main className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5">
         {chat.messages.length === 0 && !chat.isThinking && (
           <WelcomeMat identity={identity} onStart={chat.sendMessage} />

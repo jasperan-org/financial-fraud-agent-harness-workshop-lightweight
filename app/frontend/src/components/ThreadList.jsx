@@ -2,10 +2,7 @@ import { Trash2 } from "lucide-react";
 
 export default function ThreadList({ threads, currentThreadId, onSelect, onDelete }) {
   return (
-    <aside className="w-56 border-r border-white/5 bg-bg-panel overflow-y-auto py-2">
-      <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-text-muted">
-        Threads
-      </div>
+    <div className="py-1">
       {threads.length === 0 && (
         <div className="px-3 py-2 text-xs text-text-secondary">
           (no threads yet — your first message will create one)
@@ -48,6 +45,6 @@ export default function ThreadList({ threads, currentThreadId, onSelect, onDelet
           </div>
         );
       })}
-    </aside>
+    </div>
   );
 }

@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Plus, Database, Info } from "lucide-react";
+import { Database, Info } from "lucide-react";
 import IdentitySelector from "./IdentitySelector";
 import AboutModal from "./AboutModal";
 
 export default function Header({
-  connected, threadId, onNewThread,
+  connected, threadId,
   identities, identityId, onIdentityChange,
 }) {
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -37,12 +37,6 @@ export default function Header({
           <span className={`text-xs px-2 py-0.5 rounded ${connected ? "bg-accent-memory/15 text-accent-memory" : "bg-accent-sql/15 text-accent-sql"}`}>
             {connected ? "connected" : "disconnected"}
           </span>
-          <button
-            onClick={onNewThread}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 hover:bg-white/10"
-          >
-            <Plus size={12} /> new thread
-          </button>
         </div>
       </header>
       <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />

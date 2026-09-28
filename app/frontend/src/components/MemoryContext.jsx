@@ -251,7 +251,7 @@ function Stat({ label, value, color }) {
 export default function MemoryContext({ contextWindow, tokenUsage }) {
   const sections = contextWindow?.sections || [];
   return (
-    <aside className="w-96 border-l border-white/5 bg-bg-panel overflow-y-auto py-3 px-3 space-y-2">
+    <div className="h-full w-full overflow-y-auto py-3 px-3 space-y-2">
       <div className="px-1 py-1 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="text-[10px] uppercase tracking-wider text-text-muted">Memory Context</div>
@@ -278,6 +278,6 @@ export default function MemoryContext({ contextWindow, tokenUsage }) {
       ) : (
         sections.map((s) => <Section key={s.key} section={s} />)
       )}
-    </aside>
+    </div>
   );
 }
