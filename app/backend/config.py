@@ -128,3 +128,13 @@ LLM_MODEL_MAX_TOKENS = int(os.environ.get("LLM_MODEL_MAX_TOKENS", str(_default_m
 # OAMP scoping (every memory carries these)
 USER_ID = os.environ.get("EDA_USER_ID", "enterprise-operator")
 AGENT_ID = os.environ.get("EDA_AGENT_ID", "enterprise-data-agent")
+
+
+# Live data simulator — streams new banking activity into FINANCE so the app
+# feels like a production system under real-time load. Set LIVE_FEED=false to
+# disable entirely; the front-end can also pause/resume it at runtime.
+LIVE_FEED = os.environ.get("LIVE_FEED", "true").strip().lower() in ("1", "true", "yes", "on")
+LIVE_FEED_INTERVAL = float(os.environ.get("LIVE_FEED_INTERVAL", "6"))    # seconds between events
+LIVE_FEED_MAX = int(os.environ.get("LIVE_FEED_MAX", "300"))              # most live rows kept at once
+LIVE_FEED_TTL_MIN = int(os.environ.get("LIVE_FEED_TTL_MIN", "25"))       # age at which live rows are purged
+LIVE_FEED_FLAG_RATE = float(os.environ.get("LIVE_FEED_FLAG_RATE", "0.35"))  # share that hit an AML rule

@@ -97,6 +97,9 @@ def init_app():
                 llm_client=llm_client, socketio=socketio)
     register_events(socketio)
 
+    from db.live_feed import init_live_feed
+    init_live_feed(socketio=socketio)
+
     print("\n=== Backend ready! ===\n")
 
 

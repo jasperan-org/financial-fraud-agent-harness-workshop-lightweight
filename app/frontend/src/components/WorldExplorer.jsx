@@ -46,6 +46,8 @@ const KIND_ICON = {
 export default function WorldExplorer({
   identityId, agentFocus, focusTarget, lastActivity,
   autoFollow, onToggleAutoFollow, onDismissFocus,
+  touched = {}, trace = [], isThinking = false,
+  live, identity,
 }) {
   const [data, setData] = useState({
     branches: [], merchants: [], suspicious_activity: [], activity_arcs: [],
@@ -73,6 +75,108 @@ export default function WorldExplorer({
     const t = window.setTimeout(() => setActivityFresh(false), 5000);
     return () => window.clearTimeout(t);
   }, [lastActivity]);
+
+  // ---- Live reaction to the tool calls streaming in from the chat ----------
+  // The backend emits `tables_touched` (a map of SCHEMA.TABLE → {action, ts})
+  // plus tool_started / tool_finished events. We turn those into visible
+  // motion: the layer the agent is reading pulses, a radar sweep runs while it
+  // works, and a ticker names the current tool — so the globe reads as live
+  // even when a query has no single location to fly to.
+  const pulseLayers = useMemo(() => {
+    const out = new Set();
+    for (const key of Object.keys(touched || {})) {
+      const t = key.toUpperCase();
+      if (t.endsWith(".*")) {
+        out.add("branches"); out.add("merchants"); out.add("suspicious_activity");
+        continue;
+      }
+      if (t.includes("TRANSACTION") || t.includes("SAR") || t.includes("SANCTION")) out.add("suspicious_activity");
+      if (t.includes("MERCHANT")) out.add("merchants");
+      if (t.includes("BRANCH") || t.includes("ACCOUNT") || t.includes("CUSTOMER") || t.includes("LOAN")) out.add("branches");
+    }
+    return out;
+  }, [touched]);
+  const pulseKey = useMemo(() => [...pulseLayers].sort().join(","), [pulseLayers]);
+  const [pulseOn, setPulseOn] = useState(false);
+
+  useEffect(() => {
+    if (!pulseKey) { setPulseOn(false); return; }
+    const id = window.setInterval(() => setPulseOn((v) => !v), 550);
+    return () => window.clearInterval(id);
+  }, [pulseKey]);
+
+  const liveTool = useMemo(() => {
+    const evs = (trace || []).filter((t) => t.type === "tool_started" || t.type === "tool_finished");
+    const last = evs[evs.length - 1];
+    if (!last) return null;
+    return {
+      name: last.name,
+      done: last.type === "tool_finished",
+      tables: Object.keys(touched || {}),
+    };
+  }, [trace, touched]);
+
+  // ---- Live data feed ------------------------------------------------------
+  // The backend streams simulated banking activity. We keep only the events
+  // this persona is allowed to see (same region contract as /api/world) and
+  // render them as fresh, pulsing markers + arcs on top of the fetched layers.
+  const amountMasked = useMemo(() => {
+    const masks = identity?.mask_cols || [];
+    return masks.some((m) => String(m).toUpperCase().endsWith("AMOUNT_CENTS"));
+  }, [identity]);
+
+  const liveAllowed = useMemo(() => {
+    const regs = identity?.regions;
+    return (live?.events || []).filter((e) => !regs || regs.includes(e.region));
+  }, [live?.events, identity]);
+
+  const liveFlagged = useMemo(
+    () => liveAllowed.filter((e) => e.status === "FLAGGED" || e.status === "BLOCKED"),
+    [liveAllowed],
+  );
+
+  const livePoints = useMemo(
+    () => liveFlagged.slice(0, 120).map((e) => ({
+      kind: "suspicious_activity",
+      id: `live-${e.txn_id}`,
+      txn_id: e.txn_id,
+      txn_ts: e.txn_ts,
+      amount_cents: e.amount_cents,
+      status: e.status,
+      flag_reason: e.flag_reason,
+      channel: e.channel,
+      region: e.region,
+      merchant: e.merchant,
+      merchant_category: e.merchant_category,
+      lat: e.lat,
+      lng: e.lng,
+      live: true,
+    })),
+    [liveFlagged],
+  );
+
+  const liveArcs = useMemo(
+    () => liveFlagged
+      .filter((e) => e.origin && e.lat != null)
+      .slice(0, 30)
+      .map((e) => ({
+        kind: "activity_arc",
+        id: `live-${e.txn_id}`,
+        status: e.status,
+        flag_reason: e.flag_reason,
+        region: e.region,
+        branch: e.origin.branch,
+        branch_code: e.origin.branch_code,
+        merchant: e.merchant,
+        startLat: e.origin.lat,
+        startLng: e.origin.lng,
+        endLat: e.lat,
+        endLng: e.lng,
+        color: FLAG_ARC_COLOR[e.flag_reason] || "#ffffff",
+        live: true,
+      })),
+    [liveFlagged],
+  );
 
   const fetchWorld = () => {
     setLoading(true);
@@ -151,19 +255,27 @@ export default function WorldExplorer({
 
   const points = useMemo(() => {
     const out = [];
+    // The layer the agent is currently reading breathes (1.35× → 1.9×) so the
+    // map visibly responds to the tool call even without a camera move.
+    const grow = (layer) =>
+      pulseLayers.has(layer) ? (pulseOn ? 1.9 : 1.35) : 1;
     if (layers.branches) {
       for (const b of data.branches) {
-        out.push({ ...b, size: 0.18, color: LAYER_COLORS.branch });
+        out.push({ ...b, _layer: "branches", size: 0.18 * grow("branches"), color: LAYER_COLORS.branch });
       }
     }
     if (layers.merchants) {
       for (const m of data.merchants) {
-        out.push({ ...m, size: 0.12, color: LAYER_COLORS.merchant });
+        out.push({ ...m, _layer: "merchants", size: 0.12 * grow("merchants"), color: LAYER_COLORS.merchant });
       }
     }
     if (layers.suspicious_activity) {
       for (const s of data.suspicious_activity || []) {
-        out.push({ ...s, size: 0.3, color: LAYER_COLORS.suspicious_activity });
+        out.push({ ...s, _layer: "suspicious_activity", size: 0.3 * grow("suspicious_activity"), color: LAYER_COLORS.suspicious_activity });
+      }
+      // Live AML hits stream in — slightly larger so fresh ones stand out.
+      for (const s of livePoints) {
+        out.push({ ...s, _layer: "suspicious_activity", size: 0.45 * grow("suspicious_activity"), color: LAYER_COLORS.suspicious_activity });
       }
     }
     if (searchResult) {
@@ -176,11 +288,11 @@ export default function WorldExplorer({
       });
     }
     return out;
-  }, [data, layers, searchResult]);
+  }, [data, layers, searchResult, pulseLayers, pulseOn, livePoints]);
 
   const arcs = useMemo(() => {
     if (!layers.suspicious_activity) return [];
-    return (data.activity_arcs || [])
+    const base = (data.activity_arcs || [])
       .filter((a) => a.origin && a.destination)
       .map((a) => ({
         startLat: a.origin.lat,
@@ -190,18 +302,27 @@ export default function WorldExplorer({
         color: FLAG_ARC_COLOR[a.flag_reason] || "#ffffff",
         ...a,
       }));
-  }, [data.activity_arcs, layers.suspicious_activity]);
+    return [...base, ...liveArcs];
+  }, [data.activity_arcs, layers.suspicious_activity, liveArcs]);
 
-  // A ripple at the anchor the agent just flew to — makes the globe feel live
-  // as queries land, even when the camera move is subtle.
+  // Ripples: the anchor the agent flew to, plus the freshest live AML hits —
+  // so new detections visibly pulse on the globe as they arrive.
   const rings = useMemo(() => {
-    if (!searchResult || searchResult.lat == null || searchResult.lng == null) return [];
-    return [{
-      lat: searchResult.lat,
-      lng: searchResult.lng,
-      color: LAYER_COLORS[searchResult.kind] || "#ffd166",
-    }];
-  }, [searchResult]);
+    const out = [];
+    if (searchResult && searchResult.lat != null && searchResult.lng != null) {
+      out.push({
+        lat: searchResult.lat,
+        lng: searchResult.lng,
+        color: LAYER_COLORS[searchResult.kind] || "#ffd166",
+      });
+    }
+    for (const e of liveFlagged.slice(0, 3)) {
+      if (e.lat != null && e.lng != null) {
+        out.push({ lat: e.lat, lng: e.lng, color: FLAG_ARC_COLOR[e.flag_reason] || "#f80000" });
+      }
+    }
+    return out;
+  }, [searchResult, liveFlagged]);
 
   const onSearch = (e) => {
     e.preventDefault();
@@ -284,7 +405,7 @@ export default function WorldExplorer({
                   v
                     ? "border-white/10 bg-white/[0.05] text-text-primary"
                     : "border-white/5 text-text-muted hover:text-text-secondary"
-                }`}
+                } ${pulseLayers.has(k) ? "data-explorer-pulse-read" : ""}`}
                 title={`toggle ${k} layer`}
               >
                 <Icon size={10} style={{ color: LAYER_COLORS[k] || "#888" }} />
@@ -310,7 +431,10 @@ export default function WorldExplorer({
           </button>
           <span className="ml-auto text-[10px] text-text-muted font-mono">
             {data.stats.branches} br · {data.stats.merchants} merch ·{" "}
-            {data.stats.suspicious_activity} flagged · {data.stats.activity_arcs} arcs
+            {data.stats.suspicious_activity + livePoints.length} flagged · {data.stats.activity_arcs} arcs
+            {live?.counts?.total > 0 && (
+              <> · <span className="text-accent-oracle">+{live.counts.total} live</span></>
+            )}
           </span>
         </div>
 
@@ -327,6 +451,53 @@ export default function WorldExplorer({
           </div>
         )}
       </div>
+
+      {/* Live data feed — new transactions streaming in */}
+      {live?.enabled && liveAllowed.length > 0 && (
+        <div className="shrink-0 px-3 py-1 border-b border-white/5 flex items-center gap-2 text-[10px] font-mono">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-oracle animate-pulse shrink-0" />
+          <span className="text-accent-oracle shrink-0">live</span>
+          {liveAllowed[0].status !== "COMPLETED" ? (
+            <span className="truncate">
+              <span className="text-accent-sql">
+                {liveAllowed[0].status} · {liveAllowed[0].flag_reason}
+              </span>
+              <span className="text-text-muted">
+                {" · "}
+                {amountMasked ? "[REDACTED]" : `$${(liveAllowed[0].amount_cents / 100).toLocaleString()}`}
+                {" · "}
+                {liveAllowed[0].merchant || liveAllowed[0].origin?.branch || liveAllowed[0].region}
+              </span>
+            </span>
+          ) : (
+            <span className="truncate text-text-muted">
+              txn {liveAllowed[0].txn_id} ·{" "}
+              {amountMasked ? "[REDACTED]" : `$${(liveAllowed[0].amount_cents / 100).toLocaleString()}`}
+              {" · "}
+              {liveAllowed[0].merchant || liveAllowed[0].region}
+            </span>
+          )}
+          <span className="ml-auto text-text-muted shrink-0">
+            +{live.counts.total} · {live.counts.flagged + live.counts.blocked} AML
+          </span>
+        </div>
+      )}
+
+      {/* Live tool ticker — what the agent is doing right now */}
+      {isThinking && liveTool && (
+        <div className="shrink-0 px-3 py-1 border-b border-white/5 flex items-center gap-2 text-[10px] font-mono bg-accent-skill/[0.04]">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-skill animate-pulse shrink-0" />
+          <span className="text-accent-skill shrink-0">
+            {liveTool.done ? "✓" : "▶"} {liveTool.name}
+          </span>
+          {liveTool.tables.length > 0 && (
+            <span className="text-text-muted truncate">
+              {liveTool.tables.map((t) => t.split(".").pop()).join(", ")}
+            </span>
+          )}
+          <span className="ml-auto text-text-muted shrink-0">agent working…</span>
+        </div>
+      )}
 
       {/* Live activity — what the agent is looking at right now */}
       {lastActivity && lastActivity.lat != null && (
@@ -447,6 +618,23 @@ export default function WorldExplorer({
                <span style="color:#888">${d.flag_reason || "AML"} · ${d.region}</span>
              </div>`
           }
+        />
+        {/* Radar sweep — runs while the agent works so the globe reads as
+            live even when the query has no single location to fly to. */}
+        <div
+          className="pointer-events-none absolute rounded-full"
+          style={{
+            width: Math.round(Math.min(globeSize.w, globeSize.h) * 0.96),
+            height: Math.round(Math.min(globeSize.w, globeSize.h) * 0.96),
+            left: "50%",
+            top: "50%",
+            transform: "translate(-50%, -50%) rotate(0deg)",
+            background:
+              "conic-gradient(from 0deg, rgba(17,138,178,0) 0deg, rgba(17,138,178,0.30) 22deg, rgba(17,138,178,0) 46deg)",
+            animation: "globe-sweep 4s linear infinite",
+            opacity: isThinking ? 0.9 : 0,
+            transition: "opacity 400ms ease",
+          }}
         />
       </div>
     </div>

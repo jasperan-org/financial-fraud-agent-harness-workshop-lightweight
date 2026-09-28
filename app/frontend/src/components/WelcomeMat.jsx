@@ -7,23 +7,31 @@ const CLEARANCE_BADGE = {
 
 // Starter prompts per persona. Each entry has:
 //   text     — the prompt the button sends as a chat message
-//   tag      — optional pill: 'globe' | 'denied'
+//   tag      — optional pill: 'globe' | 'denied'. 'globe' means the World
+//              panel reacts to this card — either the agent calls focus_world,
+//              or the answer is regional and the globe follows automatically.
 //   denyHint — when tag === 'denied', a 1-line explanation of which boundary
 //              the question is expected to hit so the user understands the
 //              red badge means "this is supposed to fail for this persona".
 const STARTERS = {
   agent: [
     { text: "Briefly summarize the FINANCE schema — what entities and how they relate." },
-    { text: "How many transactions were flagged or blocked by the AML rules in the last 90 days, and for which reasons?" },
-    { text: "Give me the complete 360° view of account 7 — customer, branch, cards, and transactions — in one document." },
+    { text: "How many transactions were flagged or blocked by the AML rules in the last 90 days, and which regions and typologies drive them?",
+      tag: "globe" },
+    { text: "Give me the complete 360° view of account 7 — customer, branch, cards, and transactions — in one document.",
+      tag: "globe" },
+    { text: "Map the AML picture: flag counts by region and typology for the last 90 days.",
+      tag: "globe" },
     { text: "Pull up the SAR narrative for customer 42 and summarize the investigation.",
       tag: "denied",
       denyHint: "SAR_REPORTS is compliance-only — this persona can't read it at all." },
   ],
   cfo: [
     { text: "What's the total transaction volume in USD over the last 90 days?" },
-    { text: "Show me the top 5 branches by transaction count, with the average amount." },
-    { text: "Compare all four regions side by side — volume, flagged counts, and the dominant AML typology in each." },
+    { text: "Show me the top 5 branches by transaction count, with the average amount.",
+      tag: "globe" },
+    { text: "Compare all four regions side by side — volume, flagged counts, and the dominant AML typology in each.",
+      tag: "globe" },
     { text: "Fly the globe to the Wall Street branch and tell me about its region.",
       tag: "globe" },
     { text: "Open AGENT.AGENT_AUTHORIZATIONS and list every persona's region access.",
@@ -32,7 +40,8 @@ const STARTERS = {
   ],
   "compliance.officer": [
     { text: "List the open SAR reports with their reason codes and customer risk ratings." },
-    { text: "Which customers drive the most flagged transactions, and what patterns do they show?" },
+    { text: "Which customers drive the most flagged transactions, and where are they based?",
+      tag: "globe" },
     { text: "Which AML rules actually generate SAR filings, and how often does each rule fire?" },
     { text: "Fly the globe to BitVault Exchange and break down that merchant's flagged transactions by typology.",
       tag: "globe" },
@@ -41,9 +50,11 @@ const STARTERS = {
       denyHint: "even compliance can't open AGENT admin tables." },
   ],
   "analyst.east": [
-    { text: "Which branches in EUROPE or MIDDLE_EAST have the most flagged transactions?" },
+    { text: "Which branches in EUROPE or MIDDLE_EAST have the most flagged transactions?",
+      tag: "globe" },
     { text: "What's the transaction mix by channel for my region over the last 90 days?" },
-    { text: "Which AML typology dominates my region, and how concentrated is it?" },
+    { text: "Which AML typology dominates my region, and how concentrated is it?",
+      tag: "globe" },
     { text: "Fly the globe to the EUROPE region and highlight flagged activity.",
       tag: "globe" },
     { text: "Show me the top AMERICAS transactions by amount — I want to compare against my region.",
@@ -51,9 +62,12 @@ const STARTERS = {
       denyHint: "analyst.east can't see AMERICAS rows, AND transaction amounts are masked for this clearance." },
   ],
   "analyst.west": [
-    { text: "Which merchants in AMERICAS or ASIA_PACIFIC attract the most flagged activity?" },
-    { text: "List the casinos and crypto exchanges in my region." },
-    { text: "Where are the RAPID_CASH_OUT cases concentrated, and which channel do they use?" },
+    { text: "Which merchants in AMERICAS or ASIA_PACIFIC attract the most flagged activity?",
+      tag: "globe" },
+    { text: "List the casinos and crypto exchanges in my region.",
+      tag: "globe" },
+    { text: "Where are the RAPID_CASH_OUT cases concentrated, and which region and channel do they use?",
+      tag: "globe" },
     { text: "Fly the globe to Marina Bay Sands and tell me how much flagged activity that casino has.",
       tag: "globe" },
     { text: "What's the total transaction value for EUROPE over the last 90 days?",
@@ -61,9 +75,12 @@ const STARTERS = {
       denyHint: "analyst.west can't see EUROPE rows — and amounts are masked for this clearance anyway." },
   ],
   "ops.viewer": [
-    { text: "How many branches are in each region, and where are they?" },
-    { text: "Which merchants have the most flagged transactions in the last 120 days?" },
-    { text: "Which branches carry the most flagged or blocked transactions, and through which channels?" },
+    { text: "How many branches are in each region, and where are they?",
+      tag: "globe" },
+    { text: "Which merchants have the most flagged transactions in the last 120 days?",
+      tag: "globe" },
+    { text: "Which branches carry the most flagged or blocked transactions, and through which channels?",
+      tag: "globe" },
     { text: "Fly the globe to our Dubai branch and zoom in.",
       tag: "globe" },
     { text: "Show me the customer record for the account with the highest balance.",
@@ -89,7 +106,8 @@ const TAG_META = {
  *
  * Every card is calibrated to return real insight for a first-time user — no
  * dead ends and no cards that depend on an optional API key:
- *   • A globe-driving question (focus_world) tagged "globe".
+ *   • Globe-driving questions tagged "globe" — some call focus_world
+ *     explicitly, the rest are regional answers the globe follows on its own.
  *   • One question deliberately calibrated to FAIL for this persona's
  *     authorization rules — flagged with a red "expected: denied" chip so the
  *     user learns where the boundary is.
@@ -170,7 +188,10 @@ export default function WelcomeMat({ identity, onStart }) {
           </div>
           <p className="mt-3 text-[10px] text-text-muted">
             Click a card to send it as your first message — or type your own
-            below. Cards marked <span className="text-accent-sql">expected: denied</span>{" "}
+            below. Cards tagged <span className="text-accent-memory">globe</span>{" "}
+            make the World panel react: some fly the camera explicitly, the rest
+            are regional answers the globe follows automatically. Cards marked{" "}
+            <span className="text-accent-sql">expected: denied</span>{" "}
             intentionally hit this persona's authorization boundary so you can
             see how the agent surfaces the denial. Switch persona in the
             header to change what you can see.

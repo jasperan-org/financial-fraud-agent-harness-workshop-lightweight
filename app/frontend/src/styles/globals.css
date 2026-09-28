@@ -85,3 +85,11 @@
 .data-explorer-pulse-read  { animation: pulse-read  3.5s ease-out 1; }
 .data-explorer-pulse-scan  { animation: pulse-scan  3.5s ease-out 1; }
 .data-explorer-pulse-write { animation: pulse-write 3.5s ease-out 1; }
+
+/* World Explorer "live" cues — the globe reacts to the tool calls happening
+   in the chat. A radar sweep runs while the agent is working, and the layer
+   chips reuse the DataExplorer pulse classes above. */
+@keyframes globe-sweep {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}

@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Database, Info } from "lucide-react";
+import { Database, Info, Activity } from "lucide-react";
 import IdentitySelector from "./IdentitySelector";
 import AboutModal from "./AboutModal";
 
 export default function Header({
   connected, threadId,
   identities, identityId, onIdentityChange,
+  live,
 }) {
   const [aboutOpen, setAboutOpen] = useState(false);
 
@@ -34,6 +35,27 @@ export default function Header({
             onChange={onIdentityChange}
           />
           <span className="text-xs text-text-muted font-mono">thread: {threadId}</span>
+          {live && (
+            <button
+              onClick={() => live.setFeed(!live.enabled)}
+              title={
+                live.enabled
+                  ? "live data feed on — new transactions stream in; click to pause"
+                  : "live data feed paused — click to resume"
+              }
+              className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border font-mono transition-colors ${
+                live.enabled
+                  ? "border-accent-oracle/40 text-accent-oracle bg-accent-oracle/10"
+                  : "border-white/10 text-text-muted hover:text-text-secondary"
+              }`}
+            >
+              <Activity size={11} className={live.enabled ? "animate-pulse" : ""} />
+              {live.enabled ? "live" : "paused"}
+              {live.enabled && live.counts.total > 0 && (
+                <span className="text-text-muted">+{live.counts.total}</span>
+              )}
+            </button>
+          )}
           <span className={`text-xs px-2 py-0.5 rounded ${connected ? "bg-accent-memory/15 text-accent-memory" : "bg-accent-sql/15 text-accent-sql"}`}>
             {connected ? "connected" : "disconnected"}
           </span>

@@ -119,7 +119,19 @@ You'll learn how to plumb an agent tool through to live front-end state via a pe
 ![World Explorer with flagged-activity arcs over Earth-night, plus the Data Explorer above showing the AGENT.SKILLBOX table](images/world-explorer-globe.png)
 *World Explorer (bottom) renders the same FINANCE data as a Palantir-style 3D globe — branches, merchants, and the suspicious-activity layer: recent FLAGGED / BLOCKED transactions plotted at their merchant, with arcs colour-coded by AML flag reason from the account's home branch. The search bar resolves branch codes/names, merchant names, customer names, or regions; clicking `fly` pans the camera. The Data Explorer above (155 rows of `AGENT.SKILLBOX` shown) lives in the same view so you can see the structured catalogue and the spatial layer side-by-side. Both panes apply the active persona's identity filter — switch to `analyst.east` and only EUROPE + MIDDLE_EAST features render, with masked columns greyed out in the grid.*
 
-### 8. Operational legibility (the right-side pane and bottom panels)
+### 8. Live data feed — a production feel
+
+The app can also *simulate the bank operating*. `db/live_feed.py` runs a background greenlet that inserts one new transaction every few seconds — mostly ordinary card activity, ~35% fresh AML hits (STRUCTURING, GEO_VELOCITY, HIGH_RISK_COUNTRY, RAPID_CASH_OUT, LARGE_CASH_DEPOSIT) — and broadcasts each over Socket.IO as `live_txn`. The World panel:
+
+- **Pulses a marker** at the merchant (or the account's home branch for the cash rules) and draws a **home-branch → merchant arc** for each new hit.
+- Runs a **radar sweep** and a **live ticker** naming the latest transaction.
+- Ticks a **live counter** (`+N live`) in the header and the toolbar.
+
+The feed is bounded and self-cleaning: live rows use a reserved `txn_id` range (≥ 9,000,000), are capped (`LIVE_FEED_MAX`, default 300) and expire (`LIVE_FEED_TTL_MIN`, default 25 min), so the curated seed data is never touched. It respects identity on the client — a persona only plots events in its authorized regions, and masked amounts render as `[REDACTED]`. Toggle it live from the header **live / paused** pill, or disable it entirely with `LIVE_FEED=false`.
+
+Because the rows land in `FINANCE.TRANSACTIONS`, the agent sees them too — ask "how many flagged in the last 90 days?" twice and the number has moved. That is the point: an AI agent with real-time access to its data.
+
+### 9. Operational legibility (the right-side pane and bottom panels)
 
 Every input the model received is visible:
 
@@ -138,7 +150,7 @@ The **World Explorer** renders the spatial layer of the same data (branches, mer
 
 You'll learn how to make an agent's reasoning auditable by showing exactly what entered its prompt, exactly what tools it dispatched, and exactly what data those tools returned — without baking that observability into the agent's own logic.
 
-### 9. Provider routing and graceful degradation
+### 10. Provider routing and graceful degradation
 
 `agent/llm.py` is an `LlmRouter` that:
 

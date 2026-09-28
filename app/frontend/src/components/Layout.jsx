@@ -43,7 +43,7 @@ function RailButton({ icon: Icon, label, onClick, active }) {
  * slide-over toggled from the rail. The split between chat and instruments is
  * drag-resizable and remembered per browser.
  */
-export default function Layout({ connected, chat, identity, socket }) {
+export default function Layout({ connected, chat, identity, socket, live }) {
   const [tab, setTab] = useState("world");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [panelFrac, setPanelFrac] = useState(() => {
@@ -109,6 +109,7 @@ export default function Layout({ connected, chat, identity, socket }) {
         identities={identity.identities}
         identityId={identity.identityId}
         onIdentityChange={identity.setIdentityId}
+        live={live}
       />
 
       <div className="flex-1 flex overflow-hidden relative min-h-0">
@@ -153,6 +154,10 @@ export default function Layout({ connected, chat, identity, socket }) {
             contextWindow={chat.contextWindow}
             tokenUsage={chat.tokenUsage}
             touched={chat.touched}
+            trace={chat.trace}
+            isThinking={chat.isThinking}
+            live={live}
+            identity={identity.identity}
           />
 
           <HistoryDrawer

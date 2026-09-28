@@ -735,12 +735,20 @@ def _anchor_from_run_sql(sql: str, output: str):
                         region=str(reg) if reg else None, altitude=1.8,
                     )
 
-        # 2. A branch code / merchant / city column anchors more precisely.
+        # 2. A branch code / name / merchant / city column anchors more precisely.
         code_i = col("BRANCH_CODE")
         if code_i is not None:
             for r in rows:
                 if r[code_i]:
                     anchor = _anchor_for_branch(str(r[code_i]))
+                    if anchor:
+                        return anchor
+
+        branch_i = col("BRANCH_NAME", "BRANCH")
+        if branch_i is not None:
+            for r in rows:
+                if r[branch_i]:
+                    anchor = _anchor_for_branch(str(r[branch_i]))
                     if anchor:
                         return anchor
 

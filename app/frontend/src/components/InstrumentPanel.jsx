@@ -22,11 +22,12 @@ export default function InstrumentPanel({
   tab, onTabChange,
   identityId, agentFocus, focusTarget, lastActivity,
   autoFollow, onToggleAutoFollow, onDismissFocus,
-  contextWindow, tokenUsage, touched,
+  contextWindow, tokenUsage, touched, trace, isThinking,
+  live, identity,
 }) {
   const activeIndex = Math.max(0, TABS.findIndex((t) => t.key === tab));
   const active = TABS[activeIndex];
-  const worldLive = !!agentFocus;
+  const worldLive = !!agentFocus || isThinking;
 
   return (
     <section className="shrink-0 flex flex-col min-w-0 h-[55vh] w-full border-t border-white/5 lg:h-full lg:w-[var(--panel-frac)] lg:border-t-0 lg:border-l bg-bg-panel">
@@ -67,6 +68,11 @@ export default function InstrumentPanel({
             autoFollow={autoFollow}
             onToggleAutoFollow={onToggleAutoFollow}
             onDismissFocus={onDismissFocus}
+            touched={touched}
+            trace={trace}
+            isThinking={isThinking}
+            live={live}
+            identity={identity}
           />
         )}
         {tab === "context" && (
