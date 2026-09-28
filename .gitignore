@@ -75,3 +75,7 @@ keys.txt
 # Agent-tooling artifacts (generated locally per agent session, not shared)
 AGENTS.md
 excalidraw.log
+
+# Timestamped notebook snapshots taken before scripted edits. The pre-change
+# versions are recoverable from git history; these are just a local safety net.
+notebook_backups/
