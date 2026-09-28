@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Globe from "react-globe.gl";
-import { Globe2, Search, Building2, Store, AlertTriangle, RefreshCw } from "lucide-react";
+import { Globe2, Search, Building2, Store, AlertTriangle, RefreshCw, Crosshair } from "lucide-react";
 
 const LAYER_COLORS = {
   branch:             "#ffd166", // accent-tool
   merchant:           "#118ab2", // accent-skill
   suspicious_activity: "#f80000", // accent-oracle — red AML dots
+  customer:           "#06d6a0", // accent-memory
+  region:             "#3b82f6",
+  coords:             "#a78bfa",
 };
 
 // Arc color by AML flag reason (activity_arcs).
@@ -40,7 +43,10 @@ const KIND_ICON = {
  * the agent's `focus_world` tool still flies the camera even though this
  * component may be mounted only while the World tab is active.
  */
-export default function WorldExplorer({ identityId, agentFocus, focusTarget, onDismissFocus }) {
+export default function WorldExplorer({
+  identityId, agentFocus, focusTarget, lastActivity,
+  autoFollow, onToggleAutoFollow, onDismissFocus,
+}) {
   const [data, setData] = useState({
     branches: [], merchants: [], suspicious_activity: [], activity_arcs: [],
     customers_forbidden: false,
@@ -54,10 +60,19 @@ export default function WorldExplorer({ identityId, agentFocus, focusTarget, onD
   const [layers, setLayers] = useState({
     branches: true, merchants: true, suspicious_activity: true,
   });
+  // Briefly true after the agent moves the globe, so the live strip can pulse.
+  const [activityFresh, setActivityFresh] = useState(false);
 
   const globeRef = useRef(null);
   const wrapRef = useRef(null);
   const [globeSize, setGlobeSize] = useState({ w: 720, h: 480 });
+
+  useEffect(() => {
+    if (!lastActivity) return;
+    setActivityFresh(true);
+    const t = window.setTimeout(() => setActivityFresh(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [lastActivity]);
 
   const fetchWorld = () => {
     setLoading(true);
@@ -177,6 +192,17 @@ export default function WorldExplorer({ identityId, agentFocus, focusTarget, onD
       }));
   }, [data.activity_arcs, layers.suspicious_activity]);
 
+  // A ripple at the anchor the agent just flew to — makes the globe feel live
+  // as queries land, even when the camera move is subtle.
+  const rings = useMemo(() => {
+    if (!searchResult || searchResult.lat == null || searchResult.lng == null) return [];
+    return [{
+      lat: searchResult.lat,
+      lng: searchResult.lng,
+      color: LAYER_COLORS[searchResult.kind] || "#ffd166",
+    }];
+  }, [searchResult]);
+
   const onSearch = (e) => {
     e.preventDefault();
     const raw = searchQ.trim();
@@ -266,6 +292,22 @@ export default function WorldExplorer({ identityId, agentFocus, focusTarget, onD
               </button>
             );
           })}
+          <button
+            onClick={onToggleAutoFollow}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${
+              autoFollow
+                ? "border-accent-skill/40 bg-accent-skill/10 text-accent-skill"
+                : "border-white/5 text-text-muted hover:text-text-secondary"
+            }`}
+            title={
+              autoFollow
+                ? "auto-follow on — the globe flies to the regions the agent queries"
+                : "auto-follow off — only explicit focus_world calls move the globe"
+            }
+          >
+            <Crosshair size={10} />
+            auto-follow {autoFollow ? "on" : "off"}
+          </button>
           <span className="ml-auto text-[10px] text-text-muted font-mono">
             {data.stats.branches} br · {data.stats.merchants} merch ·{" "}
             {data.stats.suspicious_activity} flagged · {data.stats.activity_arcs} arcs
@@ -285,6 +327,29 @@ export default function WorldExplorer({ identityId, agentFocus, focusTarget, onD
           </div>
         )}
       </div>
+
+      {/* Live activity — what the agent is looking at right now */}
+      {lastActivity && lastActivity.lat != null && (
+        <div className="shrink-0 px-3 py-1 border-b border-white/5 flex items-center gap-2 text-[10px] font-mono">
+          <span
+            className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+              activityFresh ? "bg-accent-skill animate-pulse" : "bg-text-muted/40"
+            }`}
+          />
+          <span className="text-text-muted shrink-0">
+            {lastActivity.source === "explicit" ? "agent" : "auto"}
+          </span>
+          <span className="text-text-primary truncate">
+            {lastActivity.kind}: {lastActivity.label || lastActivity.target}
+          </span>
+          <span className="text-text-muted truncate ml-auto">
+            {_fix(lastActivity.lat, 2)}, {_fix(lastActivity.lng, 2)}
+          </span>
+          {!autoFollow && lastActivity.source === "auto" && (
+            <span className="text-text-muted/70 shrink-0">· auto-follow off</span>
+          )}
+        </div>
+      )}
 
       {/* Agent-driven focus banner */}
       {agentFocus && (
@@ -356,6 +421,14 @@ export default function WorldExplorer({ identityId, agentFocus, focusTarget, onD
               globeRef.current.pointOfView({ lat: d.lat, lng: d.lng, altitude: 1.4 }, 1000);
             }
           }}
+          ringsData={rings}
+          ringLat="lat"
+          ringLng="lng"
+          ringColor={(d) => d.color}
+          ringMaxRadius={4}
+          ringPropagationSpeed={2.2}
+          ringRepeatPeriod={800}
+          ringAltitude={0.006}
           arcsData={arcs}
           arcStartLat="startLat"
           arcStartLng="startLng"

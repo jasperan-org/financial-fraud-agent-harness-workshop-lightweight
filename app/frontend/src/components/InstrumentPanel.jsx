@@ -20,11 +20,13 @@ const TABS = [
  */
 export default function InstrumentPanel({
   tab, onTabChange,
-  identityId, agentFocus, focusTarget, onDismissFocus,
+  identityId, agentFocus, focusTarget, lastActivity,
+  autoFollow, onToggleAutoFollow, onDismissFocus,
   contextWindow, tokenUsage, touched,
 }) {
   const activeIndex = Math.max(0, TABS.findIndex((t) => t.key === tab));
   const active = TABS[activeIndex];
+  const worldLive = !!agentFocus;
 
   return (
     <section className="shrink-0 flex flex-col min-w-0 h-[55vh] w-full border-t border-white/5 lg:h-full lg:w-[var(--panel-frac)] lg:border-t-0 lg:border-l bg-bg-panel">
@@ -43,6 +45,9 @@ export default function InstrumentPanel({
             >
               <Icon size={12} className={isActive ? t.text : ""} />
               {t.label}
+              {t.key === "world" && worldLive && (
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-skill animate-pulse" title="the globe is following the agent" />
+              )}
             </button>
           );
         })}
@@ -58,6 +63,9 @@ export default function InstrumentPanel({
             identityId={identityId}
             agentFocus={agentFocus}
             focusTarget={focusTarget}
+            lastActivity={lastActivity}
+            autoFollow={autoFollow}
+            onToggleAutoFollow={onToggleAutoFollow}
             onDismissFocus={onDismissFocus}
           />
         )}

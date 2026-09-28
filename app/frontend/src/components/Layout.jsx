@@ -146,6 +146,9 @@ export default function Layout({ connected, chat, identity, socket }) {
             identityId={identity.identityId}
             agentFocus={worldFocus.agentFocus}
             focusTarget={worldFocus.focusTarget}
+            lastActivity={worldFocus.lastActivity}
+            autoFollow={worldFocus.autoFollow}
+            onToggleAutoFollow={() => worldFocus.setAutoFollow((v) => !v)}
             onDismissFocus={worldFocus.dismiss}
             contextWindow={chat.contextWindow}
             tokenUsage={chat.tokenUsage}
