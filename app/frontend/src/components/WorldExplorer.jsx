@@ -20,6 +20,12 @@ const FLAG_ARC_COLOR = {
   LARGE_CASH_DEPOSIT: "#f80000",
 };
 
+// Live-feed arcs are transient: only the freshest few are drawn, and any older
+// than this window drop off, so new AML hits appear as lines and then fade
+// instead of piling up on the globe forever.
+const LIVE_ARC_WINDOW_MS = 90_000;
+const LIVE_ARC_MAX = 8;
+
 const KIND_ICON = {
   branch:   Building2,
   merchant: Store,
@@ -125,18 +131,34 @@ export default function WorldExplorer({
     return masks.some((m) => String(m).toUpperCase().endsWith("AMOUNT_CENTS"));
   }, [identity]);
 
+  // Tick so the recency window below re-evaluates as events age — otherwise a
+  // live arc would only disappear when the next event happened to arrive.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 4000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Region-gated (for the ticker + counters) — no time window.
   const liveAllowed = useMemo(() => {
     const regs = identity?.regions;
     return (live?.events || []).filter((e) => !regs || regs.includes(e.region));
   }, [live?.events, identity]);
 
+  // Recent only — drives the transient arcs, points and rings so the globe
+  // never accumulates lines.
+  const liveRecent = useMemo(
+    () => liveAllowed.filter((e) => nowTick - (e.receivedAt || nowTick) < LIVE_ARC_WINDOW_MS),
+    [liveAllowed, nowTick],
+  );
+
   const liveFlagged = useMemo(
-    () => liveAllowed.filter((e) => e.status === "FLAGGED" || e.status === "BLOCKED"),
-    [liveAllowed],
+    () => liveRecent.filter((e) => e.status === "FLAGGED" || e.status === "BLOCKED"),
+    [liveRecent],
   );
 
   const livePoints = useMemo(
-    () => liveFlagged.slice(0, 120).map((e) => ({
+    () => liveFlagged.slice(0, 60).map((e) => ({
       kind: "suspicious_activity",
       id: `live-${e.txn_id}`,
       txn_id: e.txn_id,
@@ -158,7 +180,7 @@ export default function WorldExplorer({
   const liveArcs = useMemo(
     () => liveFlagged
       .filter((e) => e.origin && e.lat != null)
-      .slice(0, 30)
+      .slice(0, LIVE_ARC_MAX)
       .map((e) => ({
         kind: "activity_arc",
         id: `live-${e.txn_id}`,
@@ -431,7 +453,7 @@ export default function WorldExplorer({
           </button>
           <span className="ml-auto text-[10px] text-text-muted font-mono">
             {data.stats.branches} br · {data.stats.merchants} merch ·{" "}
-            {data.stats.suspicious_activity + livePoints.length} flagged · {data.stats.activity_arcs} arcs
+            {data.stats.suspicious_activity + livePoints.length} flagged · {data.stats.activity_arcs} recent arcs
             {live?.counts?.total > 0 && (
               <> · <span className="text-accent-oracle">+{live.counts.total} live</span></>
             )}

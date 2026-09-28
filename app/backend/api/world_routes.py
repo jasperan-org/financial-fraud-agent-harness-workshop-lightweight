@@ -26,7 +26,7 @@ import oracledb
 from flask import Blueprint, jsonify, request
 
 from api.identities import get_identity
-from config import DEMO_USER
+from config import DEMO_USER, WORLD_ARC_LIMIT
 
 
 world_bp = Blueprint("world", __name__)
@@ -185,7 +185,10 @@ def world():
                 })
 
             # Activity arcs — home branch → merchant for flagged / blocked
-            # transactions in the last 120 days.
+            # transactions in the last 120 days. Capped to the most recent
+            # WORLD_ARC_LIMIT rows: drawing every arc (hundreds) buries the
+            # globe in lines. Recency, not txn_id, decides what's kept, so the
+            # map always reflects the freshest activity.
             cur.execute(
                 f"SELECT t.txn_id, t.status, t.flag_reason, t.region, "
                 f"       b.branch_code, b.name AS branch_name, "
@@ -200,8 +203,9 @@ def world():
                 f"   AND t.txn_ts >= SYSTIMESTAMP - INTERVAL '120' DAY(3) "
                 f"   AND m.latitude IS NOT NULL "
                 f" {region_clause} "
-                f" ORDER BY t.txn_id",
-                region_binds,
+                f" ORDER BY t.txn_ts DESC, t.txn_id DESC "
+                f" FETCH FIRST :arc_limit ROWS ONLY",
+                {**region_binds, "arc_limit": WORLD_ARC_LIMIT},
             )
             for (tid, status, reason, region, bcode, bname,
                  blat, blng, mname, mlat, mlng) in cur:

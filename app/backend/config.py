@@ -138,3 +138,9 @@ LIVE_FEED_INTERVAL = float(os.environ.get("LIVE_FEED_INTERVAL", "6"))    # secon
 LIVE_FEED_MAX = int(os.environ.get("LIVE_FEED_MAX", "300"))              # most live rows kept at once
 LIVE_FEED_TTL_MIN = int(os.environ.get("LIVE_FEED_TTL_MIN", "25"))       # age at which live rows are purged
 LIVE_FEED_FLAG_RATE = float(os.environ.get("LIVE_FEED_FLAG_RATE", "0.35"))  # share that hit an AML rule
+
+# World globe caps. The flagged layer has ~hundreds of rows across the 120-day
+# window; drawing every home-branch → merchant arc saturates the globe, so the
+# API returns only the *most recent* N arcs. The flagged dots are left uncapped
+# (they read as a heat map); override the arc cap with WORLD_ARC_LIMIT.
+WORLD_ARC_LIMIT = int(os.environ.get("WORLD_ARC_LIMIT", "30"))

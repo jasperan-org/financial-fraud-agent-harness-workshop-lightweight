@@ -29,7 +29,9 @@ export function useLiveFeed(socket) {
     };
     const onTxn = (p) => {
       if (!p) return;
-      setEvents((prev) => [p, ...prev].slice(0, MAX_EVENTS));
+      // Stamp arrival so the globe can fade live arcs/points out after a short
+      // window instead of letting every line accumulate.
+      setEvents((prev) => [{ ...p, receivedAt: Date.now() }, ...prev].slice(0, MAX_EVENTS));
       setSeq((s) => s + 1);
       setCounts((c) => ({
         total: c.total + 1,

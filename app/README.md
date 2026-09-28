@@ -127,6 +127,8 @@ The app can also *simulate the bank operating*. `db/live_feed.py` runs a backgro
 - Runs a **radar sweep** and a **live ticker** naming the latest transaction.
 - Ticks a **live counter** (`+N live`) in the header and the toolbar.
 
+The globe stays legible under load: `/api/world` returns only the **most recent** `WORLD_ARC_LIMIT` arcs (default 30 of the ~160 in the 120-day window), and the live arcs are transient — only the freshest `LIVE_ARC_MAX` (8) are drawn, fading out after a 90-second window. So new AML hits appear as lines and then drop off instead of accumulating.
+
 The feed is bounded and self-cleaning: live rows use a reserved `txn_id` range (≥ 9,000,000), are capped (`LIVE_FEED_MAX`, default 300) and expire (`LIVE_FEED_TTL_MIN`, default 25 min), so the curated seed data is never touched. It respects identity on the client — a persona only plots events in its authorized regions, and masked amounts render as `[REDACTED]`. Toggle it live from the header **live / paused** pill, or disable it entirely with `LIVE_FEED=false`.
 
 Because the rows land in `FINANCE.TRANSACTIONS`, the agent sees them too — ask "how many flagged in the last 90 days?" twice and the number has moved. That is the point: an AI agent with real-time access to its data.
