@@ -19,7 +19,7 @@ from agent.skills import build_skill_manifest
 from agent.system_prompt import SYSTEM_PROMPT
 from config import AGENT_ID, ONNX_EMBED_MODEL, USER_ID
 from db.dbfs import DBFS
-from memory.manager import memory_links
+from memory.manager import content_to_text, memory_links
 
 
 def _safe(callable_, default, *, label: str = ""):
@@ -208,13 +208,11 @@ def _episodic_memories(memory_client, query: str, thread_id: str | None = None, 
         # Hard scope: only episodes that originated on this thread.
         if str(meta.get("thread_id", "")) != str(thread_id):
             continue
-        body = getattr(r, "content", "") or ""
-        if hasattr(body, "read"):
-            body = body.read()
+        body = content_to_text(getattr(r, "content", ""))
         items.append({
             "thread_id": meta.get("thread_id", ""),
             "user_query": str(meta.get("user_query", ""))[:200],
-            "body": str(body)[:600],
+            "body": body[:600],
         })
         if len(items) >= k:
             break
@@ -232,12 +230,9 @@ def _list_thread_messages(memory_client, thread_id: str, limit: int = 10):
     rows = memory_client._store.list_thread_messages(thread_id, last_n=limit)
     out = []
     for m in rows or []:
-        content = getattr(m, "content", "") or ""
-        if hasattr(content, "read"):
-            content = content.read()
         out.append({
             "role": getattr(m, "role", "?") or "?",
-            "content": str(content)[:600],
+            "content": content_to_text(getattr(m, "content", ""))[:600],
         })
     return out
 
@@ -270,9 +265,7 @@ def _top_memories(memory_client, query: str, thread_id: str | None = None, k: in
         # theirs. Don't double-render here.
         if kind in ("tool_output", "episodic"):
             continue
-        body = getattr(r, "content", "") or ""
-        if hasattr(body, "read"):
-            body = body.read()
+        body = content_to_text(getattr(r, "content", ""))
         origin = str(meta.get("origin_thread_id") or meta.get("thread_id") or "")
         if not origin:
             scope = "global"
@@ -283,7 +276,7 @@ def _top_memories(memory_client, query: str, thread_id: str | None = None, k: in
         items.append({
             "kind": kind,
             "subject": meta.get("subject", ""),
-            "body": str(body)[:500],
+            "body": body[:500],
             "origin_thread_id": origin,
             "scope": scope,
             "links": memory_links(memory_client, getattr(rec, "id", ""), limit=3),
@@ -308,14 +301,12 @@ def _recent_tool_outputs(memory_client, thread_id: str, limit: int = 8):
     out = []
     for r in rows or []:
         meta = getattr(r, "metadata", None) or {}
-        body = getattr(r, "content", "") or ""
-        if hasattr(body, "read"):
-            body = body.read()
+        body = content_to_text(getattr(r, "content", ""))
         out.append({
             "tool_name": meta.get("tool_name", "?"),
             "tool_call_id": meta.get("tool_call_id", ""),
             "args": str(meta.get("tool_args", ""))[:240],
-            "preview": str(body)[:600],
+            "preview": body[:600],
         })
     return out
 

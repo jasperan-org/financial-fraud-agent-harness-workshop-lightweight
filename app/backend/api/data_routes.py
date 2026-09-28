@@ -392,6 +392,10 @@ def scan_schema(schema: str):
     """
     try:
         s = schema.upper()
+        if s == "DBFS":
+            return jsonify({
+                "error": "DBFS is the scratchpad mount, not a scannable SQL schema."
+            }), 400
         if s not in TABLE_ALLOWLIST:
             return jsonify({"error": f"unknown schema {schema!r}"}), 404
 

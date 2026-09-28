@@ -29,7 +29,7 @@ from agent.tools import (
     set_request_thread_id,
 )
 from api.identities import referenced_tables
-from memory.manager import get_or_create_thread
+from memory.manager import content_to_text, get_or_create_thread
 
 
 # Map duality view → underlying tables that get touched when the agent reads
@@ -238,7 +238,7 @@ def _run_turn_loop(
         _emit_token_usage(socketio, sid, resp, step, llm_client=llm_client)
 
         if not msg.tool_calls:
-            final = msg.content or ""
+            final = content_to_text(msg.content)
             trace.append({"type": "final_answer", "step": step, "content": final})
             break
 
@@ -311,7 +311,7 @@ def _run_turn_loop(
                          "content": "Budget exhausted. Provide your best answer now, no more tools."})
         resp = chat_with_retry(llm_client, messages, tools=None)
         _emit_token_usage(socketio, sid, resp, max_iterations, llm_client=llm_client)
-        final = resp.choices[0].message.content or "(no answer produced)"
+        final = content_to_text(resp.choices[0].message.content) or "(no answer produced)"
         trace.append({"type": "forced_finalize", "content": final})
 
     try:

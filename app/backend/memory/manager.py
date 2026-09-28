@@ -35,6 +35,62 @@ from config import (
 MEMORY_STORE_ID = "EDA_ONNX"
 
 
+def content_to_text(content) -> str:
+    """Flatten an OAMP content value into plain text.
+
+    OAMP >= 26.8 stores message/memory content as either a plain string or a
+    sequence of ``MessageContent`` parts (``TextContent``, ``ImageContent``,
+    ...). Calling ``str()`` on that sequence yields the dataclass repr — e.g.
+    ``(TextContent(id='...', timestamp=None, text='...'),)`` — which is what the
+    chat history and context pane used to render. This collapses it back to the
+    underlying text so every read path returns a string.
+
+    Also tolerates legacy values: raw strings, LOB objects (``.read()``), a
+    single content part, and ``None``.
+    """
+    if content is None:
+        return ""
+
+    # Legacy LOB column / file-like value.
+    if hasattr(content, "read"):
+        try:
+            content = content.read()
+        except Exception:
+            return str(content)
+
+    if isinstance(content, str):
+        return content
+
+    # A single content part (TextContent / ImageContent / ...).
+    if not isinstance(content, (list, tuple)):
+        text = getattr(content, "text", None)
+        if isinstance(text, str):
+            return text
+        if hasattr(content, "description"):
+            desc = getattr(content, "description", None)
+            return f"[image: {desc}]" if desc else "[image]"
+        return str(content)
+
+    # A sequence of content parts.
+    parts: list[str] = []
+    for part in content:
+        if part is None:
+            continue
+        if isinstance(part, str):
+            parts.append(part)
+            continue
+        text = getattr(part, "text", None)
+        if isinstance(text, str):
+            parts.append(text)
+            continue
+        if hasattr(part, "description"):
+            desc = getattr(part, "description", None)
+            parts.append(f"[image: {desc}]" if desc else "[image]")
+            continue
+        parts.append(str(part))
+    return "\n".join(p for p in parts if p)
+
+
 class OracleONNXEmbedder(IEmbedder):
     """Routes embedding through Oracle's in-DB ONNX model (§3.4 of the notebook).
     Same connection the OAMP client uses → no network round-trip, no extra keys.
@@ -234,8 +290,7 @@ def _link_view(store, other_id: str, relation: str, direction: str) -> dict:
         pass
     meta = (getattr(record, "metadata", None) or {}) if record else {}
     body = getattr(record, "content", "") if record else ""
-    if hasattr(body, "read"):
-        body = body.read()
+    body = content_to_text(body)
     return {
         "relation": relation,
         "direction": direction,
@@ -243,7 +298,7 @@ def _link_view(store, other_id: str, relation: str, direction: str) -> dict:
         "kind": meta.get("kind", "memory"),
         "subject": meta.get("subject", ""),
         "status": str(getattr(record, "status", "")).split(".")[-1],
-        "body": str(body)[:300],
+        "body": body[:300],
     }
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request
 
 from api.context import get_context_window, list_threads
+from memory.manager import content_to_text
 
 
 api_bp = Blueprint("api", __name__)
@@ -60,12 +61,9 @@ def thread_messages(thread_id: str):
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
     out = []
     for m in rows or []:
-        content = getattr(m, "content", "") or ""
-        if hasattr(content, "read"):
-            content = content.read()
         out.append({
             "role": getattr(m, "role", "?") or "?",
-            "content": str(content),
+            "content": content_to_text(getattr(m, "content", "")),
             "timestamp": str(getattr(m, "timestamp", "")),
         })
     return jsonify({"thread_id": thread_id, "messages": out})

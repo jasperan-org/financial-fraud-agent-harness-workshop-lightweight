@@ -35,6 +35,7 @@ from db.deep_security import set_identity as set_db_identity
 from memory.manager import (
     INVALIDATING_LINK_TYPES,
     LINK_TYPES,
+    content_to_text,
     find_memory,
     link_memories,
 )
@@ -283,17 +284,13 @@ def _retrieve_knowledge(query: str, k: int = 5, kinds=None,
         if kinds is not None:
             if kind_value is None or kind_value not in kinds:
                 continue
-        body = getattr(r, "content", "") or ""
-        if hasattr(body, "read"):
-            body = body.read()
+        body = content_to_text(getattr(r, "content", ""))
         links = []
         if follow_links:
             direct_id = getattr(r, "id", None) or getattr(rec, "id", None)
             for rel, linked in (getattr(r, "linked_results", None) or []):
                 lmeta = getattr(linked, "metadata", None) or {}
-                lbody = getattr(linked, "content", "") or ""
-                if hasattr(lbody, "read"):
-                    lbody = lbody.read()
+                lbody = content_to_text(getattr(linked, "content", ""))
                 if rel.source_record_id == direct_id:
                     label, direction = rel.relation_type, "out"
                 else:
@@ -305,12 +302,12 @@ def _retrieve_knowledge(query: str, k: int = 5, kinds=None,
                     "status": str(getattr(linked, "status", "")).split(".")[-1],
                     "kind": lmeta.get("kind", "memory"),
                     "subject": lmeta.get("subject", ""),
-                    "body": str(lbody),
+                    "body": lbody,
                 })
         candidates.append({
             "kind": kind_value or "memory",
             "subject": meta.get("subject", ""),
-            "body": str(body),
+            "body": body,
             "metadata": meta,
             "links": links,
         })
@@ -329,6 +326,149 @@ _DUALITY_VIEW_TABLES = {
     "customer_dv": {"FINANCE.CUSTOMERS", "FINANCE.ACCOUNTS",
                      "FINANCE.BRANCHES", "FINANCE.LOANS"},
 }
+
+
+# --------------------------------------------------------------------------- #
+# Duality-view fallback
+# --------------------------------------------------------------------------- #
+# Oracle's JSON Relational Duality View engine cannot read a table that carries
+# more than one VPD / DBMS_RLS policy. Part 8's kernel-enforced identity puts
+# two policies on FINANCE.ACCOUNTS (a region predicate + a balance mask), three
+# on FINANCE.CUSTOMERS, etc. The view DDL then *succeeds* but every SELECT fails
+# with ORA-40606 ("Table 'ACCOUNTS' does not have a primary or unique key") —
+# a misleading message; the table's PK is intact.
+#
+# So each duality view is mirrored here as a plain SQL/JSON constructor over the
+# same base tables. The database still applies VPD to that query (rows filtered,
+# masked columns nulled), so the trust boundary is unchanged — only the
+# projection mechanism differs. `get_document`/`query_documents` try the duality
+# view first and fall back to these on the incompatibility errors.
+_DOC_SQL = {
+    "account_dv": {
+        "root": "accounts a",
+        "pk": "a.account_id",
+        "doc": """JSON_OBJECT(
+            '_id'          VALUE a.account_id,
+            'accountType'  VALUE a.account_type,
+            'currency'     VALUE a.currency,
+            'balanceCents' VALUE a.balance_cents,
+            'status'       VALUE a.status,
+            'openedTs'     VALUE a.opened_ts,
+            'region'       VALUE (SELECT JSON_OBJECT(
+                                  'branchCode' VALUE b.branch_code, 'name' VALUE b.name,
+                                  'city' VALUE b.city, 'country' VALUE b.country,
+                                  'region' VALUE b.region)
+                                FROM __S__.branches b WHERE b.branch_id = a.branch_id),
+            'customer'     VALUE (SELECT JSON_OBJECT(
+                                  'customerId' VALUE cu.customer_id, 'fullName' VALUE cu.full_name,
+                                  'ssn' VALUE cu.ssn, 'segment' VALUE cu.segment,
+                                  'riskRating' VALUE cu.risk_rating)
+                                FROM __S__.customers cu WHERE cu.customer_id = a.customer_id),
+            'cards'        VALUE (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                                  'cardId' VALUE ca.card_id, 'cardType' VALUE ca.card_type,
+                                  'cardNumber' VALUE ca.card_number, 'status' VALUE ca.status,
+                                  'dailyLimitCents' VALUE ca.daily_limit_cents) RETURNING CLOB)
+                                FROM __S__.cards ca WHERE ca.account_id = a.account_id),
+            'transactions' VALUE (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                                  'txnId' VALUE t.txn_id, 'txnTs' VALUE t.txn_ts,
+                                  'amountCents' VALUE t.amount_cents, 'currency' VALUE t.currency,
+                                  'channel' VALUE t.channel, 'txnType' VALUE t.txn_type,
+                                  'status' VALUE t.status, 'flagReason' VALUE t.flag_reason,
+                                  'region' VALUE t.region,
+                                  'merchant' VALUE (SELECT JSON_OBJECT(
+                                      'merchantId' VALUE m.merchant_id, 'name' VALUE m.name,
+                                      'mccCode' VALUE m.mcc_code, 'category' VALUE m.category,
+                                      'country' VALUE m.country)
+                                    FROM __S__.merchants m WHERE m.merchant_id = t.merchant_id),
+                                  'wireMessage' VALUE (SELECT JSON_OBJECT(
+                                      'messageId' VALUE w.message_id, 'senderBic' VALUE w.sender_bic,
+                                      'receiverBic' VALUE w.receiver_bic,
+                                      'beneficiaryName' VALUE w.beneficiary_name,
+                                      'beneficiaryCountry' VALUE w.beneficiary_country,
+                                      'purposeCode' VALUE w.purpose_code)
+                                    FROM __S__.wire_messages w WHERE w.txn_id = t.txn_id)) RETURNING CLOB)
+                                FROM __S__.transactions t WHERE t.account_id = a.account_id)
+          )""",
+    },
+    "customer_dv": {
+        "root": "customers cu",
+        "pk": "cu.customer_id",
+        "doc": """JSON_OBJECT(
+            '_id'         VALUE cu.customer_id,
+            'fullName'    VALUE cu.full_name,
+            'ssn'         VALUE cu.ssn,
+            'segment'     VALUE cu.segment,
+            'riskRating'  VALUE cu.risk_rating,
+            'country'     VALUE cu.country,
+            'accounts'    VALUE (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                              'accountId' VALUE a.account_id, 'accountType' VALUE a.account_type,
+                              'currency' VALUE a.currency, 'balanceCents' VALUE a.balance_cents,
+                              'status' VALUE a.status,
+                              'branch' VALUE (SELECT JSON_OBJECT(
+                                  'branchCode' VALUE b.branch_code, 'name' VALUE b.name,
+                                  'city' VALUE b.city, 'region' VALUE b.region)
+                                FROM __S__.branches b WHERE b.branch_id = a.branch_id)) RETURNING CLOB)
+                            FROM __S__.accounts a WHERE a.customer_id = cu.customer_id),
+            'loans'       VALUE (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                              'loanId' VALUE l.loan_id, 'loanType' VALUE l.loan_type,
+                              'amountCents' VALUE l.amount_cents, 'rateBp' VALUE l.rate_bp,
+                              'termMonths' VALUE l.term_months, 'status' VALUE l.status) RETURNING CLOB)
+                            FROM __S__.loans l WHERE l.customer_id = cu.customer_id),
+            'sanctionsScreenings' VALUE (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                              'screeningId' VALUE s.screening_id, 'listType' VALUE s.list_type,
+                              'matchScore' VALUE s.match_score, 'disposition' VALUE s.disposition,
+                              'screenedTs' VALUE s.screened_ts) RETURNING CLOB)
+                            FROM __S__.sanctions_screenings s WHERE s.customer_id = cu.customer_id),
+            'kycDocuments' VALUE (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                              'documentId' VALUE d.document_id, 'docType' VALUE d.doc_type,
+                              'status' VALUE d.status, 'expiresTs' VALUE d.expires_ts) RETURNING CLOB)
+                            FROM __S__.kyc_documents d WHERE d.customer_id = cu.customer_id),
+            'beneficialOwners' VALUE (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                              'ownershipId' VALUE o.ownership_id, 'ownerName' VALUE o.owner_name,
+                              'ownershipPct' VALUE o.ownership_pct, 'layer' VALUE o.layer,
+                              'jurisdiction' VALUE o.jurisdiction) RETURNING CLOB)
+                            FROM __S__.beneficial_owners o WHERE o.company_id = cu.customer_id)
+          )""",
+    },
+}
+
+# ORA codes that mean "the duality view can't run here" (VPD conflict / missing
+# view / JSON processor). On any of these we fall back to the SQL/JSON builder.
+_DV_FALLBACK_CODES = {942, 40606, 40617, 40664, 40666}
+_DV_FALLBACK_LOGGED: set[str] = set()
+
+
+def _dv_error_code(exc) -> int | None:
+    try:
+        return exc.args[0].code
+    except Exception:
+        return None
+
+
+def _lob_text(value) -> str:
+    return value.read() if hasattr(value, "read") else str(value)
+
+
+def _log_dv_fallback_once(view: str, code: int | None) -> None:
+    if view in _DV_FALLBACK_LOGGED:
+        return
+    _DV_FALLBACK_LOGGED.add(view)
+    print(f"[tools] {view}: duality view unavailable (ORA-{code}); using the "
+          f"direct SQL/JSON document over the base tables (VPD still enforced).")
+
+
+def _set_tool_db_identity() -> None:
+    """Push the active persona into the DB session before a document read, so
+    the DBMS_RLS policies evaluate the right end-user. Mirrors tool_run_sql:
+    without it the policies see a NULL context and let everything through."""
+    identity = get_request_identity()
+    if identity is None:
+        return
+    try:
+        set_db_identity(_AGENT_CONN, identity)
+    except Exception as e:
+        print(f"[tools] DB end-user context not set for document read ({e}); "
+              "relying on application-layer filtering only")
 
 
 # Hard-coded centroids for bank regions — used by tool_focus_world when the
@@ -797,6 +937,8 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
 
         Identity-gated: if the active "Use As" persona is forbidden from any of the
         underlying tables the view projects, the call refuses with a clear error.
+        Row and column policies are enforced by the database, so masked fields come
+        back as null and out-of-region rows are absent.
 
         `view` must be one of: account_dv, customer_dv.
         `key` is the value of the document _id (numeric account_id or customer_id, as a string).
@@ -809,18 +951,43 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         denial = _duality_forbid_check(view)
         if denial:
             return json.dumps({"error": denial})
+
+        _set_tool_db_identity()
+        k = int(key) if str(key).isdigit() else key
+
+        # 1. Preferred path — the duality view.
         try:
             with _AGENT_CONN.cursor() as cur:
                 cur.execute(
                     f'SELECT JSON_SERIALIZE(data PRETTY) FROM {DEMO_USER}.{view} '
                     f"WHERE JSON_VALUE(data, '$._id') = :k",
-                    k=int(key) if str(key).isdigit() else key,
+                    k=k,
                 )
                 row = cur.fetchone()
             if not row:
                 return json.dumps({"error": f"no document with _id={key} in {view}"})
-            body = row[0].read() if hasattr(row[0], "read") else str(row[0])
-            return body
+            return _lob_text(row[0])
+        except Exception as e:
+            code = _dv_error_code(e)
+            if code not in _DV_FALLBACK_CODES:
+                return json.dumps({"error": f"{type(e).__name__}: {e}"})
+            _log_dv_fallback_once(view, code)
+
+        # 2. Fallback — the same document, built directly over the base tables.
+        #    VPD still applies (rows + masks), so the identity boundary holds.
+        spec = _DOC_SQL[view]
+        doc_sql = spec["doc"].replace("__S__", DEMO_USER)
+        try:
+            with _AGENT_CONN.cursor() as cur:
+                cur.execute(
+                    f"SELECT JSON_SERIALIZE({doc_sql} RETURNING CLOB PRETTY) "
+                    f"FROM {DEMO_USER}.{spec['root']} WHERE {spec['pk']} = :k",
+                    k=k,
+                )
+                row = cur.fetchone()
+            if not row:
+                return json.dumps({"error": f"no document with _id={key} in {view}"})
+            return _lob_text(row[0])
         except Exception as e:
             return json.dumps({"error": f"{type(e).__name__}: {e}"})
 
@@ -831,7 +998,9 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         JOINs by hand. The predicate references underlying-table columns of the view's
         root table (e.g. status, account_type for account_dv; segment, risk_rating for customer_dv).
 
-        Identity-gated: same forbid-table check as `get_document`.
+        Identity-gated: same forbid-table check as `get_document`. The database enforces
+        row/column policies, so masked fields come back as null and out-of-region rows
+        are absent.
 
         `view` must be one of: account_dv, customer_dv.
         `where` is a SQL boolean expression on the root table's columns (default '1=1').
@@ -845,12 +1014,34 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         denial = _duality_forbid_check(view)
         if denial:
             return json.dumps({"error": denial})
-        sql = (f"SELECT JSON_SERIALIZE(data) FROM {DEMO_USER}.{view} "
-               f" WHERE {where} FETCH FIRST :n ROWS ONLY")
+
+        _set_tool_db_identity()
+
+        # 1. Preferred path — the duality view.
+        dv_sql = (f"SELECT JSON_SERIALIZE(data) FROM {DEMO_USER}.{view} "
+                  f" WHERE {where} FETCH FIRST :n ROWS ONLY")
+        try:
+            with _AGENT_CONN.cursor() as cur:
+                cur.execute(dv_sql, n=max_rows)
+                docs = [_lob_text(r[0]) for r in cur]
+            return json.dumps({"count": len(docs), "documents": [json.loads(d) for d in docs]},
+                              default=str)
+        except Exception as e:
+            code = _dv_error_code(e)
+            if code not in _DV_FALLBACK_CODES:
+                return json.dumps({"error": f"{type(e).__name__}: {e}", "sql": dv_sql})
+            _log_dv_fallback_once(view, code)
+
+        # 2. Fallback — same shape over the base tables.
+        spec = _DOC_SQL[view]
+        doc_sql = spec["doc"].replace("__S__", DEMO_USER)
+        sql = (f"SELECT JSON_SERIALIZE({doc_sql} RETURNING CLOB) "
+               f"FROM {DEMO_USER}.{spec['root']} WHERE ({where}) "
+               f"FETCH FIRST :n ROWS ONLY")
         try:
             with _AGENT_CONN.cursor() as cur:
                 cur.execute(sql, n=max_rows)
-                docs = [(r[0].read() if hasattr(r[0], "read") else str(r[0])) for r in cur]
+                docs = [_lob_text(r[0]) for r in cur]
             return json.dumps({"count": len(docs), "documents": [json.loads(d) for d in docs]},
                               default=str)
         except Exception as e:
@@ -875,14 +1066,12 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
             return json.dumps({"error": f"no tool output found for tool_call_id={tool_call_id!r}"})
         rec = rows[0]
         meta = getattr(rec, "metadata", None) or {}
-        body = getattr(rec, "content", "") or ""
-        if hasattr(body, "read"):
-            body = body.read()
+        body = content_to_text(getattr(rec, "content", ""))
         return json.dumps({
             "tool_call_id": tool_call_id,
             "tool_name": meta.get("tool_name"),
             "tool_args": meta.get("tool_args"),
-            "tool_output": str(body),
+            "tool_output": body,
         })
 
     @register
