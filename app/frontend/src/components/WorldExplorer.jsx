@@ -146,16 +146,22 @@ export default function WorldExplorer({
   }, [live?.events, identity]);
 
   // Recent only — drives the transient arcs, points and rings so the globe
-  // never accumulates lines.
+  // never accumulates lines. Stabilised by id set: the 4s tick must not hand a
+  // fresh array to the globe when the membership hasn't actually changed (that
+  // would restart the arc dash animation for no reason).
   const liveRecent = useMemo(
     () => liveAllowed.filter((e) => nowTick - (e.receivedAt || nowTick) < LIVE_ARC_WINDOW_MS),
     [liveAllowed, nowTick],
   );
 
-  const liveFlagged = useMemo(
-    () => liveRecent.filter((e) => e.status === "FLAGGED" || e.status === "BLOCKED"),
-    [liveRecent],
-  );
+  const liveFlaggedRef = useRef({ key: "", arr: [] });
+  const liveFlagged = useMemo(() => {
+    const next = liveRecent.filter((e) => e.status === "FLAGGED" || e.status === "BLOCKED");
+    const key = next.map((e) => e.txn_id).join(",");
+    if (key === liveFlaggedRef.current.key) return liveFlaggedRef.current.arr;
+    liveFlaggedRef.current = { key, arr: next };
+    return next;
+  }, [liveRecent]);
 
   const livePoints = useMemo(
     () => liveFlagged.slice(0, 60).map((e) => ({
