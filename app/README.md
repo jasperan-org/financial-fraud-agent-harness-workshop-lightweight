@@ -104,13 +104,15 @@ You'll learn:
 
 Each result is also persisted into OAMP as `kind=web_search` memories so future turns can recover them via `search_knowledge` without re-querying. This tool is opt-in: it needs `TAVILY_API_KEY`, so it is deliberately absent from the welcome-mat starter cards — those are all answerable from your own data with no optional keys, and live headlines are non-deterministic enough to derail a timed demo. Ask for news in your own words once the key is set.
 
-### 7. Chat-driven UI control: `focus_world`
+### 7. Chat-driven UI control: `focus_world` (and automatic follow)
 
-The agent isn't just a backend — it can drive the UI. `focus_world(target_kind, target, altitude)` resolves a branch / merchant / customer / region to lat/lng and emits a Socket.IO event. The World Explorer panel:
+The agent isn't just a backend — it can drive the UI. `focus_world(target_kind, target, altitude)` resolves a branch / merchant / customer / region to lat/lng and emits a Socket.IO `focus_world` event with `source="explicit"`. The World Explorer panel:
 
-- **Auto-opens on `tool_started`** so the globe canvas is mounted and the data fetch is in flight before the camera-move command lands (no flicker).
+- **Auto-surfaces the World tab** when the globe is about to move, so the canvas is mounted and the camera-move command lands cleanly.
 - Shows a **"resolving…"** banner while the SQL resolves, then switches to **"agent flew the globe → Wall Street (NYC) (branch · 40.71, -74.01)"** once the coordinates arrive.
-- Calls `globe.pointOfView({lat, lng, altitude}, 1500)` to fly the camera with a smooth transition.
+- Calls `globe.pointOfView({lat, lng, altitude}, 1500)` and pulses a ripple at the anchor.
+
+The globe also **follows the agent automatically**. After each `run_sql` / `get_document` / `query_documents` call the backend reads a geographic anchor out of the result — a `REGION` column, `LATITUDE`/`LONGITUDE`, a branch code / city / merchant, or an account's home branch — and streams a `focus_world` event with `source="auto"`. A region named in the user's question focuses immediately, before the first tool runs. Auto events are deduped and capped (4 per turn) so a wide scan can't thrash the camera, and the panel's **auto-follow** toggle (persisted per browser) mutes them while leaving explicit calls working. A live activity strip shows what the agent is looking at right now.
 
 You'll learn how to plumb an agent tool through to live front-end state via a per-turn `set_request_socket(socketio, sid)` context, without coupling tool implementations to the API layer.
 

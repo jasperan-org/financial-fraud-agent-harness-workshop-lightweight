@@ -23,6 +23,9 @@ from agent.skills import build_skill_manifest
 from agent.system_prompt import SYSTEM_PROMPT
 from agent.tools import (
     TOOLS,
+    infer_world_activity,
+    infer_world_activity_from_query,
+    reset_world_activity,
     retrieve_tools,
     set_request_identity,
     set_request_socket,
@@ -198,6 +201,13 @@ def agent_turn(
     set_request_identity(identity)
     set_request_thread_id(thread_id)
     set_request_socket(socketio, sid)
+    reset_world_activity()
+    # If the question itself names a region, start the globe moving right away
+    # rather than waiting for the first SQL call.
+    try:
+        infer_world_activity_from_query(user_query)
+    except Exception as _we:
+        print(f"[harness] world query-focus failed: {type(_we).__name__}: {_we}")
     try:
         return _run_turn_loop(
             user_query=user_query, thread_id=thread_id, agent_conn=agent_conn,
@@ -276,6 +286,15 @@ def _run_turn_loop(
                     output = fn(**args)
                 except Exception as e:
                     output = json.dumps({"error": f"{type(e).__name__}: {e}"})
+
+            # Let the globe follow what the agent is actually querying: read a
+            # geographic anchor out of the SQL result or document and stream a
+            # focus_world event (deduped + capped per turn). No-op for tools
+            # with no geography.
+            try:
+                infer_world_activity(name, args, output)
+            except Exception as _we:
+                print(f"[harness] world activity infer failed: {type(_we).__name__}: {_we}")
 
             # Offload full output to OAMP, truncate inlined preview.
             # NOTE: OAM.add_memory's first arg is `content` (positional or kw);

@@ -559,6 +559,278 @@ def _resolve_world_target(kind: str, target: str):
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Automatic world-focus inference
+# --------------------------------------------------------------------------- #
+# The globe should react to what the agent is *doing*, not only to explicit
+# focus_world calls. After each data tool runs we try to read a geographic
+# anchor out of its arguments / results and stream a `focus_world` event with
+# source="auto". Events are deduped and capped per turn so a wide scan can't
+# thrash the camera. The front-end can mute auto-focus with an "auto-follow"
+# toggle; explicit focus_world calls always land.
+
+_AUTO_FOCUS_MAX = 4  # most automatic camera moves per turn
+
+# Natural-language aliases → canonical bank region. Matched on word boundaries
+# so "MENA" doesn't fire inside "amenable".
+_REGION_ALIASES = {
+    "AMERICAS": "AMERICAS", "AMERICA": "AMERICAS", "AMERICAN": "AMERICAS",
+    "NORTH AMERICA": "AMERICAS", "LATAM": "AMERICAS",
+    "EUROPE": "EUROPE", "EUROPEAN": "EUROPE", "EMEA": "EUROPE",
+    "MIDDLE EAST": "MIDDLE_EAST", "MENA": "MIDDLE_EAST",
+    "ASIA PACIFIC": "ASIA_PACIFIC", "ASIA": "ASIA_PACIFIC",
+    "ASIAN": "ASIA_PACIFIC", "APAC": "ASIA_PACIFIC",
+}
+
+_WORLD_ACTIVITY = threading.local()
+
+
+def reset_world_activity() -> None:
+    """Clear the per-turn auto-focus state. Called at the start of each turn."""
+    _WORLD_ACTIVITY.last = None
+    _WORLD_ACTIVITY.count = 0
+
+
+def _emit_world_focus(payload: dict) -> None:
+    sock, sid = get_request_socket()
+    if sock is None:
+        return
+    try:
+        if sid:
+            sock.emit("focus_world", payload, room=sid)
+        else:
+            sock.emit("focus_world", payload)
+    except Exception as e:
+        print(f"[world] emit failed: {type(e).__name__}: {e}")
+
+
+def _focus_payload(kind, target, lat, lng, label=None, region=None,
+                   metadata=None, altitude=1.5, source="auto"):
+    return {
+        "kind": kind,
+        "target": target,
+        "lat": float(lat),
+        "lng": float(lng),
+        "altitude": float(altitude),
+        "label": label or target,
+        "region": region,
+        "metadata": metadata or {},
+        "source": source,
+    }
+
+
+def _anchor_key(payload: dict):
+    return (payload.get("kind"),
+            round(float(payload.get("lat") or 0.0), 2),
+            round(float(payload.get("lng") or 0.0), 2))
+
+
+def _region_from_text(text: str) -> str | None:
+    up = re.sub(r"[_\-]+", " ", (text or "").upper())
+    for alias, region in _REGION_ALIASES.items():
+        if re.search(rf"\b{re.escape(alias)}\b", up):
+            return region
+    return None
+
+
+def _anchor_for_branch(code_or_name: str):
+    resolved = _resolve_world_target("branch", code_or_name)
+    if not resolved:
+        return None
+    return _focus_payload(
+        "branch", code_or_name, resolved["lat"], resolved["lng"],
+        label=resolved.get("label"), region=resolved.get("region"),
+        metadata=resolved.get("metadata"),
+    )
+
+
+def _anchor_for_region(region: str):
+    resolved = _resolve_world_target("region", region)
+    if not resolved:
+        return None
+    meta = resolved.get("metadata") or {}
+    return _focus_payload(
+        "region", region.upper(), resolved["lat"], resolved["lng"],
+        label=region.upper(), region=region.upper(), metadata=meta,
+        altitude=meta.get("altitude_hint", 2.6),
+    )
+
+
+def _anchor_from_document(output: str):
+    """Read a branch/customer anchor out of a get_document/query_documents JSON."""
+    try:
+        doc = json.loads(output)
+    except Exception:
+        return None
+    if not isinstance(doc, dict) or doc.get("error"):
+        return None
+    if isinstance(doc.get("documents"), list):
+        if not doc["documents"] or not isinstance(doc["documents"][0], dict):
+            return None
+        doc = doc["documents"][0]
+
+    # account_dv exposes `region` as the branch object; customer_dv nests it
+    # under accounts[].branch.
+    branch = None
+    if isinstance(doc.get("region"), dict):
+        branch = doc["region"]
+    elif isinstance(doc.get("accounts"), list) and doc["accounts"]:
+        first = doc["accounts"][0]
+        if isinstance(first, dict):
+            branch = first.get("branch")
+
+    if isinstance(branch, dict):
+        code = branch.get("branchCode")
+        if code:
+            anchor = _anchor_for_branch(str(code))
+            if anchor:
+                anchor["metadata"]["city"] = branch.get("city")
+                return anchor
+
+    # Fall back to the customer's own name (anchored at their home branch).
+    name = None
+    cust = doc.get("customer")
+    if isinstance(cust, dict):
+        name = cust.get("fullName")
+    name = name or doc.get("fullName")
+    if name:
+        resolved = _resolve_world_target("customer", str(name))
+        if resolved:
+            return _focus_payload(
+                "customer", str(name), resolved["lat"], resolved["lng"],
+                label=resolved.get("label"), region=resolved.get("region"),
+                metadata=resolved.get("metadata"),
+            )
+    return None
+
+
+def _anchor_from_run_sql(sql: str, output: str):
+    """Read a location out of a run_sql result (columns) or its WHERE clause."""
+    try:
+        data = json.loads(output)
+    except Exception:
+        data = None
+
+    if isinstance(data, dict) and isinstance(data.get("columns"), list):
+        cols = [str(c).upper() for c in data["columns"]]
+        rows = data.get("rows") or []
+
+        def col(*names):
+            for n in names:
+                if n in cols:
+                    return cols.index(n)
+            return None
+
+        reg_i = col("REGION")
+
+        # 1. Explicit coordinates win — plot the exact point.
+        lat_i, lng_i = col("LATITUDE"), col("LONGITUDE")
+        if lat_i is not None and lng_i is not None and rows:
+            for r in rows:
+                if r[lat_i] is not None and r[lng_i] is not None:
+                    reg = r[reg_i] if reg_i is not None else None
+                    return _focus_payload(
+                        "coords", str(reg or "result"), r[lat_i], r[lng_i],
+                        label=f"query result ({reg})" if reg else "query result",
+                        region=str(reg) if reg else None, altitude=1.8,
+                    )
+
+        # 2. A branch code / merchant / city column anchors more precisely.
+        code_i = col("BRANCH_CODE")
+        if code_i is not None:
+            for r in rows:
+                if r[code_i]:
+                    anchor = _anchor_for_branch(str(r[code_i]))
+                    if anchor:
+                        return anchor
+
+        name_i = col("MERCHANT_NAME", "MERCHANT")
+        if name_i is not None:
+            for r in rows:
+                if r[name_i]:
+                    resolved = _resolve_world_target("merchant", str(r[name_i]))
+                    if resolved:
+                        return _focus_payload(
+                            "merchant", str(r[name_i]), resolved["lat"], resolved["lng"],
+                            label=resolved.get("label"), region=resolved.get("region"),
+                            metadata=resolved.get("metadata"),
+                        )
+
+        city_i = col("CITY")
+        if city_i is not None:
+            for r in rows:
+                if r[city_i]:
+                    anchor = _anchor_for_branch(str(r[city_i]))
+                    if anchor:
+                        return anchor
+
+        # 3. Otherwise fly to the region the rows are concentrated in.
+        if reg_i is not None and rows:
+            tally: dict[str, int] = {}
+            for r in rows:
+                v = r[reg_i]
+                if v and str(v).upper() in _REGION_CENTROIDS:
+                    tally[str(v).upper()] = tally.get(str(v).upper(), 0) + 1
+            if tally:
+                top = max(tally, key=tally.get)
+                anchor = _anchor_for_region(top)
+                if anchor:
+                    anchor["metadata"]["row_count"] = tally[top]
+                    return anchor
+
+    # Last resort: a region literal in the SQL itself.
+    reg = _region_from_text(sql)
+    if reg:
+        return _anchor_for_region(reg)
+    return None
+
+
+def infer_world_activity(name: str, args: dict, output: str):
+    """Infer a globe anchor from a tool call and stream a focus_world event.
+
+    Returns the emitted payload, or None when the call has no geography (or the
+    per-turn budget / dedupe suppresses it).
+    """
+    anchor = None
+    try:
+        if name in ("get_document", "query_documents"):
+            anchor = _anchor_from_document(output)
+        elif name == "run_sql":
+            anchor = _anchor_from_run_sql(args.get("sql") or "", output)
+    except Exception as e:
+        print(f"[world] infer failed for {name}: {type(e).__name__}: {e}")
+        return None
+
+    return _consider_auto_focus(anchor)
+
+
+def infer_world_activity_from_query(user_query: str):
+    """Fly to a bank region the user named, before any tool has run.
+
+    Makes the globe feel immediately responsive to a geographic question
+    ("what's happening in Europe?") instead of waiting for the first SQL call.
+    """
+    reg = _region_from_text(user_query)
+    if not reg:
+        return None
+    return _consider_auto_focus(_anchor_for_region(reg))
+
+
+def _consider_auto_focus(anchor: dict | None):
+    """Emit an auto-focus event unless there is no anchor, the turn's budget is
+    spent, or it would repeat the previous camera position."""
+    if not anchor:
+        return None
+    if getattr(_WORLD_ACTIVITY, "count", 0) >= _AUTO_FOCUS_MAX:
+        return None
+    if _anchor_key(anchor) == getattr(_WORLD_ACTIVITY, "last", None):
+        return None
+    _WORLD_ACTIVITY.last = _anchor_key(anchor)
+    _WORLD_ACTIVITY.count = getattr(_WORLD_ACTIVITY, "count", 0) + 1
+    _emit_world_focus(anchor)
+    return anchor
+
+
 def _duality_forbid_check(view: str) -> str | None:
     """Return a denial message if any of `view`'s underlying tables is
     forbidden for the active identity. None when the view is allowed.
@@ -1174,7 +1446,6 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
                         'EUROPE'.
         `altitude`    — globe camera altitude (1.0 = close, 2.5 = global view).
         """
-        sock, sid = get_request_socket()
         kind = (target_kind or "").strip().lower()
         if kind not in ("branch", "merchant", "customer", "region"):
             return json.dumps({"error": f"unknown target_kind {target_kind!r}; "
@@ -1202,15 +1473,9 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
             "label": anchor.get("label", target),
             "region": anchor.get("region"),
             "metadata": anchor.get("metadata", {}),
+            "source": "explicit",
         }
-        if sock is not None:
-            try:
-                if sid:
-                    sock.emit("focus_world", payload, room=sid)
-                else:
-                    sock.emit("focus_world", payload)
-            except Exception as e:
-                print(f"[focus_world] emit failed: {type(e).__name__}: {e}")
+        _emit_world_focus(payload)
         return json.dumps({"ok": True, **payload})
 
     return TOOLS
