@@ -1,9 +1,9 @@
 # Meridian Bank Data Agent — AML Demo
 
-A chat UI for the agent harness built in `enterprise_data_agent.ipynb`. Same harness, same Oracle 26ai database, but exposed through a Flask + Socket.IO API and a React + Vite + Tailwind front-end.
+A chat UI for the agent harness built in [`notebook_student.ipynb`](../notebook_student.ipynb). Same harness, same Oracle 26ai database, but exposed through a Flask + Socket.IO API and a React + Vite + Tailwind front-end.
 
-![Chat with agent-driven globe control and live token usage](images/chat-globe-control.png)
-*Asking the agent to fly the globe to a branch and report the flagged activity around it. Left rail: thread list. Centre: the assistant's grounded answer with a "show 44 step trace" link. Right pane: live `Token usage` meter (last-turn prompt vs. model-max), system prompt, recent thread messages, top semantic memories, episodic memories, recent tool outputs, DBFS scratchpad, skill manifest, tool manifest — all scoped to the active thread.*
+![Chat driving the globe, with the step trace expanded](images/meridian-chat-globe.png)
+*Asking which regions carry the most flagged activity, then telling the agent to fly the globe to the top one. Centre: the grounded answer and the expanded step trace (`search_knowledge`, `run_sql`, `focus_world`). Right: the World Explorer at the coordinates the agent resolved. The Context tab behind it shows the live `Token usage` meter, system prompt, recent thread messages, top semantic memories, tool outputs, skill manifest, and tool manifest — all scoped to the active thread.*
 
 **Demo domain:** Meridian Bank, a global retail bank. The `FINANCE` schema models 60 branches (with `SDO_GEOMETRY` lat/long) and 140 merchants across four regions (AMERICAS / EUROPE / MIDDLE_EAST / ASIA_PACIFIC), 2,000 customers, 2,650 accounts, ~3,000 cards, ~23,600 transactions over the last 90 days — including deliberately seeded AML patterns (structuring, geographic velocity, high-risk-corridor wires, rapid cash-out, large cash deposits) — plus 900 loans and 117 Suspicious Activity Reports. The AML desk's paperwork lives beside it: sanctions screenings, beneficial owners, wire messages, login events (with `SDO_GEOMETRY` locations), KYC documents, case notes and FX rates. The agent answers questions over all of it via SQL, spatial queries (`SDO_WITHIN_DISTANCE`), in-database compute (Oracle MLE), JSON Relational Duality Views, and identity-aware row/column filtering (DDS / DBMS_RLS).
 
@@ -41,8 +41,11 @@ You'll learn:
 - How to make denials *useful*: when the agent hits a forbidden table, it tells the user the persona name, the missing privilege, and which higher-clearance persona would unblock the query. No generic "access denied" — every denial is grounded in a named role.
 - The starter-prompt **"expected: denied"** chips on the welcome mat let you click straight into a deny path so you can see the boundary in action.
 
-![Welcome mat for the Analyst — East persona, with restriction tiles and tagged starter prompts](images/welcome-mat-persona.png)
-*Welcome mat shown on every fresh thread: the active persona's clearance, authorized regions, masked columns, and forbidden tables are visible at a glance. Every starter card is verified to return real rows for that persona, so a first run never lands on an empty answer: `globe` cards drive the World Explorer, and the red `expected: denied` card is calibrated to hit this persona's authorization wall (here, `analyst.east` asking for AMERICAS transactions — the kernel will drop the rows). Switch persona from the header chip and the entire mat redraws.*
+![Welcome mat for the default Analyst persona, with restriction tiles and tagged starter prompts](images/meridian-welcome.png)
+*Welcome mat shown on every fresh thread: the active persona's clearance, authorized regions, masked columns, and forbidden tables are visible at a glance. Every starter card is verified to return real rows for that persona, so a first run never lands on an empty answer: `globe` cards drive the World Explorer, and the red `expected: denied` card is calibrated to hit this persona's authorization wall (here, the default Analyst asking for a SAR narrative — `SAR_REPORTS` is compliance-only, and the kernel drops the rows). Switch persona from the header chip and the entire mat redraws.*
+
+![The same SAR question, answered as Compliance Officer](images/meridian-identity-sar.png)
+*The same SQL, a different persona: as `compliance.officer` the SAR query returns the quarter's reports, and the answer states why — "EXECUTIVE clearance, ALL regions, no masked columns, no forbidden tables in scope". Switch back to the default Analyst and the identical question returns zero rows, because `DBMS_RLS` (or Deep Data Security) answered before the application saw anything.*
 
 ### 3. The Oracle AI Database 26ai primitive set, in one app
 
@@ -116,8 +119,8 @@ The globe also **follows the agent automatically**. After each `run_sql` / `get_
 
 You'll learn how to plumb an agent tool through to live front-end state via a per-turn `set_request_socket(socketio, sid)` context, without coupling tool implementations to the API layer.
 
-![World Explorer with flagged-activity arcs over Earth-night, plus the Data Explorer above showing the AGENT.SKILLBOX table](images/world-explorer-globe.png)
-*World Explorer (bottom) renders the same FINANCE data as a Palantir-style 3D globe — branches, merchants, and the suspicious-activity layer: recent FLAGGED / BLOCKED transactions plotted at their merchant, with arcs colour-coded by AML flag reason from the account's home branch. The search bar resolves branch codes/names, merchant names, customer names, or regions; clicking `fly` pans the camera. The Data Explorer above (155 rows of `AGENT.SKILLBOX` shown) lives in the same view so you can see the structured catalogue and the spatial layer side-by-side. Both panes apply the active persona's identity filter — switch to `analyst.east` and only EUROPE + MIDDLE_EAST features render, with masked columns greyed out in the grid.*
+![World Explorer with flagged-activity arcs over Earth-night](images/meridian-world-explorer.png)
+*World Explorer renders the FINANCE data as a Palantir-style 3D globe — branches, merchants, and the suspicious-activity layer: recent FLAGGED / BLOCKED transactions plotted at their merchant, with arcs colour-coded by AML flag reason from the account's home branch. The search bar resolves branch codes/names, merchant names, customer names, or regions; clicking `fly` pans the camera. It reads the same identity filter as every other pane — switch to `analyst.east` and only EUROPE + MIDDLE_EAST features render.*
 
 ### 8. Live data feed — a production feel
 
@@ -145,6 +148,9 @@ Every input the model received is visible:
 - **DBFS scratchpad** — current thread's working files, paths shown without the physical thread prefix.
 - **Skill manifest / Tool manifest** — top-3 / top-6 entries the agent saw this turn.
 - **Token usage** — live `prompt / completion / turn-total` against the model's max context, plus thread cumulative — fills in real time as the loop iterates.
+
+![The Context tab: token usage and the live system prompt](images/meridian-context.png)
+*The Context tab mid-thread: last-turn prompt vs. model-max, per-turn completion and thread totals, then the exact system prompt prepended this turn — including the dynamically retrieved skill manifest. Below it come the sections this same pane renders for every turn: recent thread messages, top semantic memories, recent tool outputs, and the tool manifest.*
 
 The **Data Explorer** at the bottom mirrors the FINANCE schema (and the agent's own bookkeeping tables, including the synthetic `DBFS.scratchpad` virtual table) with identity-aware row filtering and column masking. Tabs **pulse with a colour-coded chip** (`READ` blue / `SCAN` green / `WRITE` amber) when the agent touches them — driven by `tables_touched` Socket.IO events that the harness emits inline with each tool dispatch.
 
@@ -209,6 +215,8 @@ python-oracledb (thin)
 
 The app no longer requires the notebook to have been run — `scripts/bootstrap.py` handles every prerequisite that the notebook used to set up.
 
+**In the Codespace all of this is automatic.** `.devcontainer/provision.sh` runs on container create and again on every start, probing each layer (`AGENT` schema + ONNX embedder, the `FINANCE` seed + duality views + skillbox, the Oracle Text index, the identity rules) and running only the script whose layer is missing. `bash .devcontainer/provision.sh --probe-only` prints what it finds; the four scripts below are the manual path.
+
 ## Setup
 
 ```bash
@@ -227,7 +235,7 @@ pip install -r backend/requirements.txt
 cd frontend && npm install && cd ..
 ```
 
-## Bootstrap (one-time, requires SYSDBA + container access)
+## Bootstrap (idempotent, requires SYSDBA + container access)
 
 ```bash
 python scripts/bootstrap.py

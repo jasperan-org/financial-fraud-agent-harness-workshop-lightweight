@@ -3,8 +3,7 @@
 > **Oracle documentation:** [`Oracle Deep Data Security Guide, 26ai`](https://docs.oracle.com/en/database/oracle/oracle-database/26/ddscg/index.html)
 > · [`Deep Data Security product page`](https://www.oracle.com/security/database-security/features/deep-data-security/)
 
-> 🧭 **Advanced reference.** Not one of the nine core TODOs in the 90-minute path. The rule set is seeded by `app/scripts/setup_deep_security.py`, the running app drives it on every read, and the reference notebook
-> [`enterprise_data_agent.ipynb`](../enterprise_data_agent.ipynb) implements it end to end as **Part 8**.
+> 🧭 **Advanced reference.** Not one of the nine core TODOs in the 90-minute path. The rule set is seeded by `app/scripts/setup_deep_security.py` (part of the Codespace's idempotent provisioning), the running app drives it on every read, and this guide is the reference for the design.
 
 Parts 4–7 give the agent memory. Part 8 asks a different question: **what is the agent allowed to see, and who decides?**
 

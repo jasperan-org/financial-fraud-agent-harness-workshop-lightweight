@@ -24,15 +24,16 @@ The workshop uses **two** database users, and the split is the trust boundary:
 
 `AGENT` is granted `SELECT` on `FINANCE`; it cannot write there. If a hostile prompt got the agent to issue `DROP TABLE`, it could only drop something `AGENT` owns.
 
-In Codespaces, `.devcontainer/setup_runtime.sh` boots Oracle and runs the three provisioning scripts in order:
+In Codespaces, `.devcontainer/provision.sh` boots Oracle, then runs — on every launch, and only for the layers that are missing — the four provisioning scripts in order:
 
 | Script | What it provisions |
 |---|---|
 | [`app/scripts/bootstrap.py`](../app/scripts/bootstrap.py) | `AGENT` user, `vector_memory_size` / `pga_aggregate_limit`, the in-DB ONNX embedder, DBFS |
 | [`app/scripts/seed.py`](../app/scripts/seed.py) | the `FINANCE` schema, the AML seed data, the duality views, the skillbox |
-| [`app/scripts/setup_advanced.py`](../app/scripts/setup_advanced.py) | the Oracle Text index and the identity policies |
+| [`app/scripts/setup_advanced.py`](../app/scripts/setup_advanced.py) | the Oracle Text index and the scheduler job |
+| [`app/scripts/setup_deep_security.py`](../app/scripts/setup_deep_security.py) | the identity rules (Deep Data Security on Enterprise-class, `DBMS_RLS` on Free) |
 
-`.devcontainer/start_app.sh` then starts the Flask backend on port 8000 and the React UI on port 3000. Everything is idempotent and safe to re-run.
+`.devcontainer/start_app.sh` runs the same provisioner before starting the Flask backend on port 8000 and the React UI on port 3000. Everything is idempotent and safe to re-run; a fully provisioned database costs a few `SELECT`s (`bash .devcontainer/provision.sh --probe-only` prints what it finds).
 
 | Setting | Default |
 |---|---|
@@ -86,7 +87,7 @@ Each ❌ row prints the command that fixes it (`cd app && python scripts/bootstr
 
 The preflight takes the §1.3 slot; the chat-client section that follows is §1.4.
 
-If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, and `setup_advanced.py`, or open [`notebook_complete_with_setup_code.ipynb`](../notebook_complete_with_setup_code.ipynb) — the full source that includes every DDL statement.
+If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, and `setup_deep_security.py` — the Codespace runs exactly those four, in that order, on every launch (`.devcontainer/provision.sh`, idempotent: whatever is already in place is left alone).
 
 ## TODO 1: Talk to the bare model
 
@@ -132,7 +133,7 @@ tail -40 .devcontainer/logs/frontend.log
 
 **`ORA-12541: TNS:no listener`** — the Oracle container isn't ready yet. Wait 30 seconds and retry.
 
-**`ORA-01017: invalid username/password`** — `AGENT` or `FINANCE` wasn't created; re-run `bash .devcontainer/setup_runtime.sh`.
+**`ORA-01017: invalid username/password`** — `AGENT` or `FINANCE` wasn't created; re-run `bash .devcontainer/provision.sh`.
 
 **`ORA-51962: vector memory area is out of space`** — `vector_memory_size = 0`. Re-run `app/scripts/bootstrap.py`, restart Oracle, then restart the kernel.
 

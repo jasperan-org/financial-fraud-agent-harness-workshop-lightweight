@@ -55,7 +55,6 @@ Parts 4 (DBFS scratchpad), 5 (Oracle MLE), 8 (identity-aware data access), 9 (JS
 
 - [Part 8 — Identity-aware data access](part-8-deep-data-security.md) — why the same SQL returns different rows per persona, what Oracle Deep Data Security does on Enterprise-class 26ai, and what the `DBMS_RLS` fallback can and cannot guarantee.
 
-- [`notebook_complete_with_setup_code.ipynb`](../notebook_complete_with_setup_code.ipynb) — full source including every Oracle DDL statement.
-- [`enterprise_data_agent.ipynb`](../enterprise_data_agent.ipynb) — the original end-to-end source notebook.
+- [`notebook_complete.ipynb`](../notebook_complete.ipynb) — the same notebook with every TODO solved (and its outputs saved, so it reads top to bottom without a run).
 
-Use them when you want to deploy this harness against an Oracle that isn't the workshop Codespace, or when you want the deeper chapters.
+To deploy this harness against an Oracle that isn't the workshop Codespace, run the same provisioning the Codespace runs: `cd app && python scripts/bootstrap.py && python scripts/seed.py && python scripts/setup_advanced.py && python scripts/setup_deep_security.py` — all idempotent, all explained in [`part-1-setup.md`](part-1-setup.md).
