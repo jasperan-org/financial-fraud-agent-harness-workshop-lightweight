@@ -46,7 +46,7 @@ The seed cell is **pre-built** — you don't need to look at the DDL or the inse
 `retrieve_knowledge(query, k, kinds=None)` is a two-stage call that the agent loop will use on every turn:
 
 1. **Cosine search** — `memory_client.search(...)` returns `k * 4` candidates ordered by vector distance.
-2. **Cross-encoder rerank** — those candidates run through `rerank(...)`, which calls `DBMS_VECTOR.RERANK` server-side when a reranker is loaded (it is, in this Codespace). When no reranker is loaded, `rerank` is a pass-through that just slices to top-k — the call site is unchanged either way.
+2. **Cross-encoder rerank** — those candidates run through `rerank(...)`, which scores every `(query, document)` pair in the database with `PREDICTION(RERANKER_ONNX USING :q AS DATA1, doc AS DATA2)` when the reranker is loaded (`app/backend/db/reranker_setup.py`; §1.3's preflight reports whether it is). When no reranker is loaded, `rerank` is a pass-through that just slices to top-k — the call site is unchanged either way.
 
 We **filter out** memories with `metadata.kind == "tool_output"` so the log of past tool calls doesn't pollute knowledge retrieval.
 
@@ -231,10 +231,28 @@ for h in hybrid_rrf_search_memories(probe_q, k=3):
 
 Watch the `r_vec` / `r_txt` columns: a row whose `r_vec` is low (top of vector list) but `r_txt` is `999999` (missing from keyword list) still gets a fair RRF score from its vector half — and vice versa. Memories that show up in **both** lists get the highest combined score.
 
+## The same three legs from LangChain — `langchain-oracledb`
+
+The notebook (§3.6) repeats the retrieval legs through [`langchain-oracledb`](https://pypi.org/project/langchain-oracledb/) — useful when the surrounding app is already a LangChain app, and useful as a second opinion on the SQL you just wrote. Same database primitives, one import each:
+
+| This Part | `langchain-oracledb` |
+|---|---|
+| `OracleONNXEmbedder` (§2.1) | `OracleEmbeddings(conn=..., params={"provider": "database", "model": "ALL_MINILM_L12_V2"})` — the in-database ONNX model, no network hop; `embed_query` returns the same 384-dim vector as `VECTOR_EMBEDDING` |
+| `retrieve_knowledge` (§3.2, vector + rerank) | `OracleVS(client=..., embedding_function=..., table_name=..., distance_strategy=DistanceStrategy.COSINE)` then `similarity_search` / `similarity_search_with_score` / `max_marginal_relevance_search` / `.as_retriever()` |
+| `keyword_search_memories` (§3.3, Oracle Text) | `create_text_index(...)` + `OracleTextSearchRetriever(vector_store=..., k=...)` |
+| `hybrid_rrf_search_memories` (§3.4, RRF in SQL) | `OracleHybridSearchRetriever(vector_store=..., idx_name=..., search_mode="hybrid")` over a `DBMS_HYBRID_VECTOR` index (`create_hybrid_index`, with `OracleVectorizerPreference` supplying the vectorizer) |
+| `get_thread` + messages (§7.1) | `OracleChatMessageHistory` |
+| — | `OracleSummary`, `OracleTextSplitter`, `OracleDocLoader`, `OracleSemanticCache` |
+
+Two practical notes:
+
+- **`OracleVS` owns its table.** It creates and manages a `VECTOR` table (`id`, `text`, `metadata`, `embedding`) with an HNSW index; that is unrelated to the OAMP-managed tables from Part 2. Point it at a table you own, or mirror a slice of OAMP rows as the notebook does.
+- **The hybrid index is exclusive.** `create_hybrid_index` fails with `ORA-29879` on a table that already carries a separate vector index *and* an Oracle Text index (which `OracleVS.from_texts` + `create_text_index` produce) — the hybrid index *is* both, so it needs its own table.
+
 ## Key Takeaways — Part 3
 
 - **Vector search alone misses exact tokens.** A user typing `AMOUNT_CENTS` or `ORA-00904` wants the row that *literally contains the string*. Pure cosine retrieval underweights this. Hybrid (vector + Oracle Text via RRF) closes the gap server-side in one SQL.
-- **Reranking is one SQL primitive.** `DBMS_VECTOR.RERANK` runs the cross-encoder server-side; the call gracefully degrades to cosine ordering when no reranker is loaded.
+- **Reranking is one SQL primitive.** `PREDICTION(RERANKER_ONNX USING :q AS DATA1, doc AS DATA2)` runs the cross-encoder server-side (register the model with `app/backend/db/reranker_setup.py`; the preflight reports whether it is there); the call gracefully degrades to cosine ordering when no reranker is loaded.
 - **Oversample before rerank.** A reranker is only useful with enough candidates to reorder. `k * 4` candidates from cosine, then rerank to top-k.
 - **RRF is rank-based, not score-based.** No need to normalize cosine distance against `SCORE(1)` — they're from different worlds. Fusing on rank dodges the calibration problem.
 

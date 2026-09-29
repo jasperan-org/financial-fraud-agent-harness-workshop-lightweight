@@ -12,7 +12,7 @@ Three glued-together pieces:
 2. **Truncation marker** — outputs over 600 bytes are replaced in the message list with a compact preview ending in `...[+N bytes. full output: fetch_tool_output(tool_call_id='call_…')]`. The model knows where to find the rest.
 3. **`fetch_tool_output(tool_call_id)`** — a registered tool that recovers the full bytes by id when the agent decides it needs them.
 
-Pieces 1 and 3 are implemented below (the original build numbered them TODO 8 and TODO 9; those numbers do not match the nine-TODO lightweight notebook). Piece 2 (the `agent_turn` redefinition with the truncation marker) is the pre-built cell at the end of Part 11 — re-run cell §11's `agent_turn` to revert to the minimal version.
+The notebook path implements all three pieces in **§7.4** (`log_tool`, `fetch_tool_output`, and the `agent_turn` redefinition with the truncation marker), and the running app's loop uses the same pattern (`app/backend/agent/harness.py`). This guide is the long-form explanation; the code below is the reference implementation of each piece.
 
 ## The math
 
@@ -38,6 +38,7 @@ def log_tool(thread_id, tool_call_id, tool_name, tool_args, tool_output):
         tool_output,
         user_id=USER_ID, agent_id=AGENT_ID,
         thread_id=thread_id,
+        ttl_days=7,               # optional: offloaded logs expire; knowledge does not
         metadata={
             "kind": "tool_output",
             "tool_call_id": tool_call_id,
@@ -47,9 +48,7 @@ def log_tool(thread_id, tool_call_id, tool_name, tool_args, tool_output):
     )
 ```
 
-The metadata shape isn't optional — the reader below looks rows up by `metadata_filter={"kind": "tool_output", "tool_call_id": ...}`, so the keys here must match. `tool_args` is JSON-serialised so OAMP's metadata store (a JSON column) can index it without a custom encoder for whatever Python types the caller passed in.
-
-The hard-stop assert below your implementation calls `log_tool` with a synthetic `tool_call_id`, then queries OAMP with the same metadata filter and checks the row came back with the right shape.
+The metadata shape isn't optional — the reader below looks rows up by `metadata_filter={"kind": "tool_output", "tool_call_id": ...}`, so the keys here must match. `tool_args` is JSON-serialised so OAMP's metadata store (a JSON column) can index it without a custom encoder for whatever Python types the caller passed in. `ttl_days` is the retention handle: the memory carries an `EXPIRES_AT` and the store retires it, so the offload log cannot grow forever.
 
 ## Reference: Register `tool_fetch_tool_output`
 

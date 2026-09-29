@@ -203,3 +203,7 @@ After Turn 3, query the OAMP store and you'll see a new memory with `metadata.ki
 **`KeyError` in `TOOLS[name]`** — The model emitted a tool name you didn't register. The dispatch handles this with `if name not in TOOLS: output = json.dumps({"error": ...})` — make sure that check is in your loop.
 
 **Agent calls the same tool with the same args repeatedly** — This is a real pathology of GPT-class models. The complete solution adds a 3-deep `recent_calls` dedupe; you don't need it for the workshop demo, but in production it's cheap insurance.
+
+## Where the loop goes next
+
+The loop above inlines every tool result into the next message. **Notebook §7.4** (and [Part 11](part-11-tool-output-offload.md)) adds the one change production needs: outputs over 600 bytes are persisted as OAMP memories (`kind="tool_output"`, with a TTL) and the prompt carries a compact reference plus `fetch_tool_output(tool_call_id=…)`. Same loop, same tools — the context window stops growing with the size of the data.

@@ -89,6 +89,10 @@ The preflight takes the §1.3 slot; the chat-client section that follows is §1.
 
 If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, and `setup_deep_security.py` — the Codespace runs exactly those four, in that order, on every launch (`.devcontainer/provision.sh`, idempotent: whatever is already in place is left alone).
 
+### Kernel dependencies
+
+The workshop kernel is the Codespace's Python 3.11 (`/usr/local/bin/python`, `pip install -r requirements.txt -r app/backend/requirements.txt`). §0.1 checks for them before anything else runs: `numpy`, `oracledb`, `openai`, `oracleagentmemory` — and `langchain_oracledb`, which §3.6 uses to show the same embeddings and retrieval legs through LangChain. §1.3 prints each version; if the preflight says a version is unknown, re-run the Codespace's build step (`bash .devcontainer/setup_build.sh`) rather than pip-installing into a different interpreter.
+
 ## TODO 1: Talk to the bare model
 
 The chat-client cell ends with your first TODO: set `QUESTION`, run the cell, and read the answer. There is no harness here, no memory, no retrieval, no tools; it is the reasoning core on its own. Remember this baseline, because Part 7 wraps the same call in a context block, retrieved tool schemas, and a dispatch loop.

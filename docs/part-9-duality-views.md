@@ -3,7 +3,7 @@
 > **Documentation:** [`Creating Duality Views`](https://docs.oracle.com/en/database/oracle/oracle-database/26/jsnvu/creating-duality-views.html)
 
 
-> 🧭 **Advanced reference.** Duality views are not one of the nine core TODOs in the 90-minute path. `account_dv` and `customer_dv` are seeded by `app/scripts/seed.py`, the running app exposes `get_document` / `query_documents`, and the reference notebooks implement them end to end. Read this when you want the deeper chapter.
+> 🧭 **Advanced reference.** Duality views are not one of the nine core TODOs in the 90-minute path. `account_dv` and `customer_dv` are seeded by `app/scripts/seed.py`, the running app exposes `get_document` / `query_documents`, and the notebook registers `account_document` in §6.6 (which falls back to the same document built with SQL/JSON when the view itself cannot run — see the caveat below). Read this when you want the deeper chapter.
 Part 6 gave the agent a vector-indexed `toolbox` (dispatchable functions). Part 7 layered the agent loop on top. **Part 9 adds a third procedural-memory shape: document-shaped reads of the relational schema** via Oracle 23ai/26ai's JSON Relational Duality Views.
 
 A duality view is a JSON projection over a set of tables joined by PK/FK/UK relationships. The same row in `accounts` is accessible as a **relational tuple** *and* as a **nested JSON document** that includes its `customer`, `branch`, and the arrays of `cards` and `transactions` (with their `merchant` nested inside). One read, no JOINs, no client-side reshaping.
@@ -32,6 +32,17 @@ One `SELECT JSON_SERIALIZE(data)` returns a fully nested document — customer, 
 | `customer_dv` | customer → accounts[]; customer → loans[]; account → branch | Customer queries: *"which loans does customer Y hold?"* |
 
 Both are read-only — no `WITH UPDATE` clause, so DML through them is rejected by the kernel.
+
+> ⚠️ **On this Free image, a duality view and kernel identity can collide.** Oracle's DV engine
+> cannot read a view whose base table carries more than one `DBMS_RLS` policy (Part 8 puts a region
+> predicate plus an amount mask on `FINANCE.ACCOUNTS`). The view DDL succeeds and the dictionary
+> reports it `VALID`, but every `SELECT` fails with a misleading `ORA-40606: Table 'ACCOUNTS' does
+> not have a primary or unique key` — the PK is intact. The app (and the notebook's §6.6
+> `account_document`) therefore try the view first and fall back to the same document built with
+> `JSON_OBJECT`/`JSON_ARRAYAGG` over the base tables: VPD still applies to that query, so only the
+> projection mechanism changes, not the trust boundary. Run
+> `python app/scripts/bootstrap.py && python app/scripts/seed.py` on a fresh volume and you will see
+> the view read fine **until** `setup_deep_security.py` installs the policies.
 
 ## Reference: Register `tool_get_document`
 
@@ -83,7 +94,7 @@ def tool_get_document(view: str, key: str) -> str:
 
 ## Writable views with ETag-based concurrency
 
-The pre-built `txn_status_dv` adds `WITH UPDATE` to the DV definition. That makes the view writable — `UPDATE txn_status_dv SET data = …` writes back to the underlying tables, atomically, with the row policy still enforced.
+A duality view whose definition carries `WITH UPDATE` is writable: `UPDATE <view> SET data = …` writes back to the underlying base tables, atomically, with the row policies still enforced.
 
 Two pieces make that safe in a multi-writer world:
 
@@ -92,12 +103,10 @@ Two pieces make that safe in a multi-writer world:
 | `WITH UPDATE` clause | Tells the kernel the view is writable; without it, `UPDATE` raises `ORA-42692` |
 | `_metadata.etag` field on every retrieved document | Optimistic concurrency. Stale writes raise `ORA-42699` |
 
-This is the same model HTTP uses for `If-Match` headers — but enforced **inside the database**, by the SQL engine, on every UPDATE through the view. No application-layer locking, no `SELECT … FOR UPDATE` fan-out, no client-side cache reconciliation logic.
+This is the same model HTTP uses for `If-Match` headers — but enforced **inside the database**, by the SQL engine, on every UPDATE through the view. No application-layer locking, no `SELECT … FOR UPDATE` fan-out, no client-side cache reconciliation logic. To try it, add `WITH UPDATE` to a copy of the view DDL in `app/backend/db/seed_finance.py` and re-run `seed.py`:
 
-The notebook demos:
-
-1. **Round-trip:** read a txn doc, flip `status`, PUT back with the matching ETag. Verifies the ETag rotates atomically.
-2. **Conflict:** two readers grab the same doc. First writer commits; second writer's ETag is now stale and the kernel raises `ORA-42699`.
+1. **Round-trip:** read a document, flip a field, write it back with the matching ETag. The ETag rotates atomically.
+2. **Conflict:** two readers grab the same document. First writer commits; second writer's ETag is now stale and the kernel raises `ORA-42699`.
 
 ## Why we don't expose the writable path to the agent
 

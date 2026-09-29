@@ -1,7 +1,7 @@
 # Part 4: DBFS Scratchpad
 
 
-> 🧭 **Advanced reference.** The DBFS scratchpad is not one of the nine core TODOs in the 90-minute path. It is live in the running app (`scratch_write` / `scratch_read` / `scratch_append`) and in the reference notebooks. Read this when you want the deeper chapter.
+> 🧭 **Advanced reference.** The DBFS scratchpad is not one of the nine core TODOs in the 90-minute path. It is live in the running app (`scratch_write` / `scratch_read` / `scratch_append`) and demonstrated in the notebook's DBFS cells after §7.3 (write a draft, read it back through a brand-new connection). Read this when you want the deeper chapter.
 [Oracle DBFS (Database File System)](https://docs.oracle.com/en/database/oracle/oracle-database/26/adlob/database-filesystem-DBFS-intro.html) is a POSIX-like filesystem layered on SecureFile LOBs in a table. The agent sees files and directories; the database sees rows. Same backups, same audit, same security model as everything else in the harness — but with `open()`/`read()`/`write()` ergonomics.
 
 ## What's pre-built

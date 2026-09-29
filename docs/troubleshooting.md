@@ -35,7 +35,7 @@ Wait ~60 seconds for FREEPDB1 to report `READ WRITE`, restart the Jupyter kernel
 
 ### ORA-04036: PGA memory used by the instance exceeds PGA_AGGREGATE_LIMIT
 
-**Symptom:** `DBMS_VECTOR.RERANK` falls back to plain cosine ordering with `ORA-04036`.
+**Symptom:** the cross-encoder rerank (`PREDICTION(RERANKER_ONNX USING :q AS DATA1, doc AS DATA2)`) falls back to plain cosine ordering after `ORA-04036`.
 
 **Cause:** The Free image ships with `pga_aggregate_limit = 2G`, which is too tight for the reranker's transient PGA use.
 
@@ -332,17 +332,30 @@ The mask registry names a column that does not exist. This is the failure mode P
 
 ### `NameError: name 'CURRENT_END_USER' is not defined` in the notebook
 
-The reference notebook's `tool_run_sql` (Part 10) reads the handle Part 8 defines. Run the Part 8 cells before the tool cells, or regenerate the section:
-
-```bash
-python scripts/insert_part8_section.py
-```
+That name belongs to the long-form reference build, not to this lightweight notebook. Here the
+identity boundary is `AGENT.SET_EDA_CTX` (set directly, or through the app's
+`db/deep_security.py::set_identity`); the notebook demonstrates it in **§6.7**, and no notebook
+tool reads a `CURRENT_END_USER` handle. If you are porting code from the long-form build, replace
+that handle with a `SET_EDA_CTX` call before the statement.
 
 ### Part 8 changes disappear after a rebuild
 
-Do not hand-edit the Part 8 cells. Edit `scripts/insert_part8_section.py` and regenerate — the generator is the source of truth for the section's code *and* for the Part 10 wiring, so a hand-applied fix to the notebook is silently reverted otherwise.
+Nothing generated owns the identity code in this repository: the policies are installed by
+`python app/scripts/setup_deep_security.py` (idempotent) and the notebook section is ordinary
+notebook content — edit it in place. The two generator scripts that *do* own notebook blocks are
+`scripts/insert_autonomy_section.py` (kernel check, preflight, Part 12) and
+`scripts/add_concept_demos.py` (the four without-vs-with cells); those are the cells not to
+hand-edit.
 
 ---
+
+## LangChain interop (§3.6)
+
+**`ModuleNotFoundError: No module named 'langchain_oracledb'`** — the kernel is missing the interop package. It is part of `requirements.txt`; on a Codespace re-run `bash .devcontainer/setup_build.sh`, locally `pip install -r requirements.txt`. §0.1 fails fast with the same message.
+
+**`RuntimeError: Failed due to a DB error: ORA-29879: cannot create multiple domain indexes on a column list using same indextype`** — you asked `create_hybrid_index` for a table that already has a standalone vector index and an Oracle Text index (`OracleVS.from_texts` + `create_text_index` produce exactly that pair). A hybrid index *is* both, so it needs its own table. To try the hybrid retriever, create an `OracleVS` table, drop the vector index LangChain created on it, then create the hybrid index.
+
+**`OracleTextSearchRetriever` returns nothing for a natural-language question** — Oracle Text wants an *expression*, not a sentence: `amount_cents OR cents OR USD`, or `operator_search=True` with your own `AND`/`OR`/`NEAR` operators. It also needs a text index on the column (`create_text_index`, §3.6).
 
 ## Checking System Status
 

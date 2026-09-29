@@ -219,11 +219,12 @@ context before executing:
 The Python post-filters stay in place as defence in depth and become no-ops when the database has
 already answered correctly.
 
-In the reference notebook the same wiring lives in **Part 10** (`tool_run_sql`), driven by the
-`CURRENT_END_USER` handle this part defines. `act_as("analyst.east")` sets that handle *and* pushes
-the context into the session, so the notebook's agent loop inherits the boundary without knowing it
-exists. Regenerate the section from the repository root with
-`python scripts/insert_part8_section.py` — it is idempotent and re-applies the Part 10 wiring.
+In the notebook the same boundary is one cell: **§6.7** runs the same three queries as five
+identities (`AGENT.SET_EDA_CTX` before each read) and prints the transaction count, the amount sum
+and the SAR row count that the kernel returns for each. There is no separate "Part 8 section" to
+generate, and no notebook-side filter to keep in sync — the notebook never filters rows itself.
+`tool_run_sql` in the app adds the one production rule the notebook cell does not need: set the
+context from the request's end user before every statement.
 
 > ⚠️ **Two honest caveats.**
 > 1. **The VPD path is fail-open.** With no context set, every predicate evaluates to `1=1` and all
@@ -342,19 +343,22 @@ this DDL. Reviewed by hand, the file is the migration.
 > `grant_agent_memory_policies`, `OracleMemoryEndUserSecurityContext`) are verified against
 > `oracleagentmemory` 26.8.0, and the Free-edition skip path is executed end to end.
 
-## The file that generates this section
+## Where this is implemented
 
-Part 8 of the notebook is generated, not hand-edited:
+Nothing in this guide is generated into the notebook — there is no `insert_part8_section.py` in this
+repository, and no notebook section to keep in sync. The moving parts are:
 
 ```bash
-python scripts/insert_part8_section.py    # idempotent; replaces Part 8 and re-wires Part 10
-python scripts/build_student_notebook.py  # validates every checked-in notebook still parses
+python app/scripts/setup_deep_security.py   # installs/refreshes the policies, rules and predicates
+python scripts/build_student_notebook.py    # validates every checked-in notebook still parses
 ```
 
-The generator holds the source of truth for the section's code cells. Editing the notebook directly
-works until the next regeneration, and the same applies to the Part 10 wiring — which is exactly the
-trap this section fell into once, when a quoting fix applied to the notebook was silently reverted by
-a rebuild.
+- **Notebook:** §6.7 — the identity table (five end users, three queries).
+- **App:** `app/backend/db/deep_security.py` (probe, VPD backend, Deep Sec DDL emitter),
+  `app/backend/api/identities.py` (the persona registry) and the per-statement `SET_EDA_CTX` inside
+  `tool_run_sql`.
+- **DDL for an Enterprise-class instance:** `app/scripts/setup_deep_security.py --ddl-only` writes
+  `app/scripts/out/deep_sec_ddl.sql`.
 
 ## Checklist for a real deployment
 

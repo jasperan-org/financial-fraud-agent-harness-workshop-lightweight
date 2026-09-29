@@ -162,8 +162,19 @@ After the four scanners run, the pre-built `write_facts()` function:
 4. **If present and `body_hash` unchanged** — skips the embed call entirely.
 5. **If present and `body_hash` changed** — updates the existing memory in place (same record id, so its links survive).
 6. **After the facts are written** — `link_schema_facts()` connects them: every column fact and relationship fact links to its table fact with `supports`.
+7. **`run_scan()` then records the run itself** — one row in `scan_history` (owner, objects scanned, facts written, JSON notes). That is *procedural* memory: queried by time and owner, not by meaning, so it lives in a regular table rather than the vector store.
 
-The hash check is what makes hourly re-scans free. The vast majority of calls hash-check and skip; only schema changes trigger an embed.
+The hash check is what makes hourly re-scans free. The vast majority of calls hash-check and skip; only schema changes trigger an embed. Re-running `link_schema_facts` is equally cheap: the store enforces one orientation per endpoint pair, so already-linked facts are counted and skipped.
+
+Two store behaviours are worth knowing before you read the counters:
+
+- **`store.list(...)` returns retired records too.** The lookup above takes the newest match (the
+  list is ordered newest-first) and compares its `body_hash`; filtering by status is the caller's job
+  — the same reason `search()` needs `include_invalid_results=False` when you want current truth only.
+- **The same body can exist in more than one record.** With `MemoryExtractionConfig(extract_memories=True)`
+  the extractor re-materialises a memory it rewrites and retires the record it came from, so a long-lived
+  workspace accumulates historical records for one fact. The upsert above keeps *one current* record per
+  `(kind, subject)`; §3.6's LangChain mirror de-duplicates by body for exactly this reason.
 
 > **First run on a fresh seed takes a couple of minutes.** The Meridian Bank schema has 15 tables,
 > ~120 columns and their relationships, so the first scan writes ~160 memories — and each new
@@ -207,19 +218,17 @@ for r in results:
         print(relation.relation_type, linked.status, linked.content)
 ```
 
-`num_hops` accepts 0–5. Direct hits hide retired memories by default; the hop is what brings the
-history back (`include_invalid_results=False` + `num_hops=1` = "current truth plus its provenance").
+`num_hops` accepts 0–5. Pass `include_invalid_results=False` alongside a hop to read "current truth, plus its provenance" — retired memories stay one hop away, not in the current set. (Leaving the flag out can surface retired rows as direct hits, which is why the notebook passes it explicitly.)
 
 The workshop uses links in four places:
 
-- **`remember(supersedes=...)`** — the agent corrects a fact by memory id or by phrase; the old fact
-  is retired and stays visible through `search_knowledge(follow_links=True)`.
-- **`link_memories(source, target, link_type)`** — connects two facts the agent already knows;
-  `supports` / `contradicts` keep both current.
-- **`search_knowledge(follow_links=True)`** — adds one hop of linked context to every hit.
-- **The scanner graph** — `run_scan` links column and relationship facts to their table facts with
-  `supports`. Searching `FINANCE.TRANSACTIONS` with `follow_links=True` returns the table fact plus
-  its columns, without a join.
+- **The scanner graph (`run_scan`)** — `link_schema_facts()` links every column and relationship fact to its table fact with `supports`, so one hit on `FINANCE.TRANSACTIONS` brings its columns along.
+- **`remember(supersedes=...)`** — the agent corrects a fact by memory id or by phrase; the old fact is retired (notebook §6.3).
+- **`link_memories(source, target, link_type)`** — connects two facts the agent already knows; `supports` / `contradicts` keep both current (notebook §6.3).
+- **`search_knowledge(follow_links=True)`** — the app's variant: adds one hop of linked context to every hit (`app/backend/agent/tools.py`). In the notebook the same traversal is two lines: `memory_client.search(..., num_hops=1, max_linked_results=…)` (§2.6).
+
+The notebook's §2.6 demonstrates the four pieces the harness does not otherwise touch — memory types
+(`guideline` / `preference`), relations, hop traversal, and retention (`ttl_days` → `EXPIRES_AT`).
 
 The right-side Memory Context pane renders relations as `→ relation` / `← relation` chips under each
 memory, with retired ones struck through.

@@ -12,7 +12,7 @@ The canonical workshop is the nine-TODO path in `notebook_student.ipynb`, follow
 - [ ] **TODO 8 — `tool_list_skills`** in Part 6. Search the `skillbox` semantically and return top-k skills as JSON.
 - [ ] **TODO 9 — `agent_turn`** in Part 7. Assemble context, call the model, dispatch tools, enforce iteration/time limits, and produce a final answer.
 
-There is no tenth TODO for identity. The rule set is installed for you by `app/scripts/setup_deep_security.py`, and the reference notebook's **Part 8** walks through what it enforces — see [Part 8](part-8-deep-data-security.md).
+There is no tenth TODO for identity. The rule set is installed for you by `app/scripts/setup_deep_security.py`; **§6.7** in the notebook shows what it enforces (the same three queries under five end users), and [Part 8](part-8-deep-data-security.md) is the full guide.
 
 ## Before you start
 
@@ -39,7 +39,7 @@ There is no tenth TODO for identity. The rule set is installed for you by `app/s
 No TODO here: Part 12 runs the harness you just built as an AML triage desk. Work it in order.
 
 - [ ] §12.2 — read the ledger DDL. `AGENT.AML_TRIAGE` is the structured decision record (one row per `(customer, typology)`); the harness owns it, never `FINANCE`.
-- [ ] §12.3 — build the alert queue. Expect **15 alerts** across the five typologies; `TRIAGE_LIMIT = 3` works the top three.
+- [ ] §12.3 — build the alert queue. The cell prints how many alerts the 30-day window holds and the three it will work (`TRIAGE_LIMIT = 3`); `IGNORE_WATERMARK = False` makes the next run incremental.
 - [ ] §12.4 — read one evidence pack line by line. That is everything the model will see.
 - [ ] §12.5 — read the policy and the validator. Unknown decisions become `REVIEW_REQUIRED`; unknown reason codes fall back to the alert's typology.
 - [ ] §12.7 — run the triage. Watch the tool trace, then read the ledger rows.
@@ -51,9 +51,14 @@ Guide: [Part 12 — Autonomous AML triage](part-12-autonomous-aml-triage.md).
 
 ## Advanced reference material
 
-Parts 4 (DBFS scratchpad), 5 (Oracle MLE), 8 (identity-aware data access), 9 (JSON Relational Duality Views), and 11 (tool-output offload) are **not** required TODOs in the 90-minute path. They remain as guides, and their code is live in the app and in the reference notebooks:
+Parts 4 (DBFS scratchpad), 5 (Oracle MLE), 8 (identity-aware data access), 9 (JSON Relational Duality Views), and 11 (tool-output offload) are **not** required TODOs in the 90-minute path, and their guides go deeper than the notebook:
 
-- [Part 8 — Identity-aware data access](part-8-deep-data-security.md) — why the same SQL returns different rows per persona, what Oracle Deep Data Security does on Enterprise-class 26ai, and what the `DBMS_RLS` fallback can and cannot guarantee.
+- **[§2.6 in the notebook](../notebook_student.ipynb)** — the rest of the OAMP surface: memory types, relations (retire vs keep), one-hop traversal, retention.
+- **[§3.6 in the notebook](../notebook_student.ipynb)** — the same embeddings and the same three retrieval legs through `langchain-oracledb` (`OracleEmbeddings`, `OracleVS`, `OracleTextSearchRetriever`). Guide: [Part 3 § LangChain](part-3-retrieval.md#the-same-three-legs-from-langchain--langchain-oracledb).
+- **[§6.6 in the notebook](../notebook_student.ipynb)** — Oracle MLE (`exec_js`), Oracle Spatial (`merchants_near`), duality views (`account_document`). Guides: [Part 5](part-5-mle.md), [Part 9](part-9-duality-views.md).
+- **[§6.7 in the notebook](../notebook_student.ipynb)** — identity: the same query under five end users, enforced by the kernel. Guide: [Part 8](part-8-deep-data-security.md).
+- **[§7.4 in the notebook](../notebook_student.ipynb)** — tool-output offload with retention on the offloaded rows. Guide: [Part 11](part-11-tool-output-offload.md).
+- **[§7.3a in the notebook](../notebook_student.ipynb)** — DBFS: write a draft, read it back through a second connection. Guide: [Part 4](part-4-dbfs.md).
 
 - [`notebook_complete.ipynb`](../notebook_complete.ipynb) — the same notebook with every TODO solved (and its outputs saved, so it reads top to bottom without a run).
 

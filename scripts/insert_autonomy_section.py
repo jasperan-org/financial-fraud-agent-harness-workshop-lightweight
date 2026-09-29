@@ -149,7 +149,7 @@ Confirms the notebook kernel has the workshop dependencies and prints the URL of
 SELF_CHECK = '''# §0.1 — Run me first: kernel check + where the running app lives.
 import importlib.util, os, platform, sys
 
-_missing = [m for m in ("numpy", "oracledb", "openai", "oracleagentmemory")
+_missing = [m for m in ("numpy", "oracledb", "openai", "oracleagentmemory", "langchain_oracledb")
             if importlib.util.find_spec(m) is None]
 if _missing:
     raise RuntimeError(
@@ -211,11 +211,11 @@ def _check(label, ok, detail="", fix=""):
 
 print("Environment")
 print(f"  ✅ {'python':<32} {sys.version.split()[0]} at {sys.executable}")
-for _pkg in ("oracledb", "oracleagentmemory", "openai", "numpy"):
+for _pkg in ("oracledb", "oracleagentmemory", "openai", "numpy", "langchain-oracledb"):
     try:
         print(f"  ✅ {_pkg:<32} {_pkg_version(_pkg)}")
     except Exception:
-        print(f"  ⚠️  {_pkg:<32} version unknown")
+        print(f"  ⚠️  {_pkg:<32} version unknown — §3.6 (LangChain interop) needs langchain-oracledb")
 
 print("\\nOracle — AGENT schema (the harness's own state)")
 _mem_table = _scalar("SELECT COUNT(*) FROM user_tables WHERE table_name = 'EDA_ONNX_MEMORY'", 0)

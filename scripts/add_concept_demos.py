@@ -126,7 +126,7 @@ print("   -> the right fact surfaces with zero shared words, because the match i
 
 CTX_MD = """## Concept check — context summarization
 
-`build_context()` is half the story: OAMP also keeps a **rolling context card** per thread (`enable_context_summary=True`, refreshed every `context_summary_update_frequency` turns), so a long thread does not replay its raw transcript every turn. Below: four corrections on a throwaway thread, raw transcript vs generated card.
+`build_context()` is half the story: OAMP also keeps a **rolling context card** per thread (`enable_context_summary=True`, refreshed every `context_summary_update_frequency` turns), so a long thread does not replay its raw transcript every turn. Below: four corrections on a throwaway thread, raw transcript vs generated card — then the card's sections, and the two ways the harness can call it.
 
 <!-- workshop:concept-demo:context -->"""
 
@@ -165,6 +165,23 @@ if _card and _raw:
     print("   append 100 turns and the transcript grows linearly while the card stays ~constant.")
 print("\\n-> The card is a rolling, model-generated summary of topics + decisions. It is what")
 print("   lets a long thread stay inside the context window without losing what was decided.")
+
+# --- what is inside it, and the two ways to call it --------------------------
+_sections = [tag for tag in ("topics", "summary", "relevant_information", "recent_messages")
+             if f"<{tag}>" in _card]
+print(f"\\nThe card is a structured block — {' · '.join(_sections)} — not a transcript,")
+print("   and the harness chooses its shape with two arguments:")
+
+_self_contained = str(get_thread(probe_thread).get_context_card(max_recent_messages=2) or "")
+_raw_tail = str(get_thread(probe_thread).get_context_card(except_last_messages=2,
+                                                          max_recent_messages=0) or "")
+print(f"   get_context_card(max_recent_messages=2)                    -> {len(_self_contained):>5} chars, "
+      f"recent messages inside: {'<recent_messages>' in _self_contained}")
+print(f"   get_context_card(except_last_messages=2, max_recent_...=0) -> {len(_raw_tail):>5} chars, "
+      f"recent messages inside: {'<recent_messages>' in _raw_tail}")
+print("   The first is self-contained: send the card alone. The second leaves the last two")
+print("   turns out — you send those raw, so they are never summarised twice (prompt-cache friendly).")
+print("   §7.1's build_context() calls exactly this and prepends the card to the prompt.")
 '''
 
 
