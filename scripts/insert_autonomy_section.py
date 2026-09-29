@@ -45,9 +45,32 @@ def code(text: str) -> dict:
             "outputs": [], "source": text.splitlines(keepends=True)}
 
 
-def block(name: str, cells: list[dict]) -> list[dict]:
+def _with_id(cell: dict, cell_id: str) -> dict:
+    """Rebuild a cell with `id` in nbformat's key order, so saved files match byte for byte."""
+    if cell["cell_type"] == "code":
+        return {
+            "cell_type": "code",
+            "execution_count": cell.get("execution_count"),
+            "id": cell_id,
+            "metadata": cell.get("metadata", {}),
+            "outputs": cell.get("outputs", []),
+            "source": cell["source"],
+        }
+    return {
+        "cell_type": "markdown",
+        "id": cell_id,
+        "metadata": cell.get("metadata", {}),
+        "source": cell["source"],
+    }
+
+
+def block(name: str, cells: list[dict], sentinel_ids: tuple[str | None, str | None] = (None, None)) -> list[dict]:
     """Bracket a block of cells with the sentinels used for idempotent replacement."""
-    return [md(BEGIN.format(name=name))] + cells + [md(END.format(name=name))]
+    begin = md(BEGIN.format(name=name))
+    end = md(END.format(name=name))
+    begin, end = (_with_id(begin, sentinel_ids[0]) if sentinel_ids[0] else begin,
+                  _with_id(end, sentinel_ids[1]) if sentinel_ids[1] else end)
+    return [begin] + cells + [end]
 
 
 def find_cell(cells: list[dict], needle: str) -> int:
@@ -57,28 +80,31 @@ def find_cell(cells: list[dict], needle: str) -> int:
     return hits[0]
 
 
-def _without_block(cells: list[dict], name: str) -> tuple[list[dict], list[dict]]:
-    """Return (cells outside the block, cells inside it)."""
+def _without_block(cells: list[dict], name: str) -> tuple[list[dict], list[dict], list[dict]]:
+    """Return (cells outside the block, sentinel cells, cells inside the block)."""
     begin, end = BEGIN.format(name=name), END.format(name=name)
-    kept, inner, dropping = [], [], False
+    kept, sentinels, inner, dropping = [], [], [], False
     for cell in cells:
         source = "".join(cell["source"])
         if begin in source:
             dropping = True
+            sentinels.append(cell)
             continue
         if dropping:
             if end in source:
                 dropping = False
+                sentinels.append(cell)
             else:
                 inner.append(cell)
             continue
         kept.append(cell)
     if dropping:
         raise SystemExit(f"unterminated {name} block")
-    return kept, inner
+    return kept, sentinels, inner
 
 
-def merge_block(name: str, new_cells: list[dict], previous: list[dict]) -> list[dict]:
+def merge_block(name: str, new_cells: list[dict], previous: list[dict],
+                sentinels: list[dict] | None = None) -> list[dict]:
     """Wrap `new_cells` in the block's sentinels, keeping unchanged cells as they are.
 
     A cell whose source is identical to the one it replaces keeps its old cell
@@ -91,9 +117,14 @@ def merge_block(name: str, new_cells: list[dict], previous: list[dict]) -> list[
         old = previous[index] if index < len(previous) else None
         if old is not None and old["cell_type"] == cell["cell_type"] and old["source"] == cell["source"]:
             merged.append(old)
-        else:
-            merged.append(cell)
-    return block(name, merged)
+            continue
+        if old is not None and "id" in old and "id" not in cell:
+            # Keep the cell's identity (the ids nbformat adds when a notebook is
+            # executed) so regenerating a notebook does not churn its diff.
+            cell = _with_id(cell, old["id"])
+        merged.append(cell)
+    sentinel_ids = tuple(cell.get("id") for cell in (sentinels or [])[:2])
+    return block(name, merged, sentinel_ids if len(sentinel_ids) == 2 else (None, None))
 
 
 def replace_text(cells: list[dict], needle: str, replacement: str) -> None:
@@ -867,7 +898,7 @@ def build_part12() -> list[dict]:
 def drop_blocks(cells: list[dict], names: tuple[str, ...]) -> list[dict]:
     """Remove these blocks (and their sentinels) from the notebook entirely."""
     for name in names:
-        cells, _ = _without_block(cells, name)
+        cells, _, _ = _without_block(cells, name)
     return cells
 
 
@@ -897,18 +928,18 @@ def update_lightweight(path: Path) -> None:
 
     # Pull the blocks we own out first — and remember what they held, so cells
     # whose source did not change keep their outputs (see merge_block).
-    previous = {}
+    previous, sentinels = {}, {}
     for name in ("self-check", "preflight", "part-12"):
-        cells, previous[name] = _without_block(cells, name)
+        cells, sentinels[name], previous[name] = _without_block(cells, name)
 
     title_at = find_cell(cells, "# Financial Data Agent Workshop")
-    cells = (cells[:title_at + 1] + merge_block("self-check", build_orientation(), previous["self-check"])
+    cells = (cells[:title_at + 1] + merge_block("self-check", build_orientation(), previous["self-check"], sentinels["self-check"])
              + cells[title_at + 1:])
     connect_at = find_cell(cells, CONNECT_ANCHOR)
-    cells = (cells[:connect_at + 1] + merge_block("preflight", build_preflight(), previous["preflight"])
+    cells = (cells[:connect_at + 1] + merge_block("preflight", build_preflight(), previous["preflight"], sentinels["preflight"])
              + cells[connect_at + 1:])
     close_at = find_cell(cells, CLOSE_ANCHOR)
-    cells = (cells[:close_at] + merge_block("part-12", build_part12(), previous["part-12"])
+    cells = (cells[:close_at] + merge_block("part-12", build_part12(), previous["part-12"], sentinels["part-12"])
              + cells[close_at:])
     append_closing(cells)
 
