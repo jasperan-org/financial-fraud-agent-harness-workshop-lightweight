@@ -10,7 +10,7 @@
 
 ## The notebook — 90 minutes, nine TODOs
 
-[`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives. Oracle is already provisioned (the Codespace ran `app/scripts/bootstrap.py` → `seed.py` → `setup_advanced.py`): the `AGENT` user, the in-database ONNX embedder and reranker, the seeded Meridian Bank `FINANCE` schema, the Oracle Text index, and the skillbox. Every TODO is harness code, and each one has a hard-stop assert below it — `Run All` is *supposed* to halt.
+[`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives. Oracle is already provisioned for you (`.devcontainer/provision.sh` runs `app/scripts/bootstrap.py` → `seed.py` → `setup_advanced.py` → `setup_deep_security.py`, idempotently): the `AGENT` user, the in-database ONNX embedder (and, when `RERANKER_URL` is set, the cross-encoder reranker), the seeded Meridian Bank `FINANCE` schema, the Oracle Text index, and the skillbox. Every TODO is harness code, and each one has a hard-stop assert below it — `Run All` is *supposed* to halt.
 
 | Block | Topic | TODO |
 |---|---|---|
@@ -96,7 +96,7 @@ Then start the app in two terminals: `cd app/backend && python app.py` (→ :800
 
 | Path | What it is |
 |---|---|
-| `notebook_student.ipynb` | The 90-minute path: nine TODO stubs, hard-stop asserts, the Part 12 capstone |
+| `notebook_student.ipynb` | The 90-minute path: nine TODOs (eight stubs plus the first prompt), hard-stop asserts, the Part 12 capstone |
 | `notebook_complete.ipynb` | The same notebook, solved — executed end to end, outputs included |
 | `app/` | The Meridian Bank AML app: Flask + Socket.IO backend, React + Vite front end, and the Oracle provisioning scripts (`bootstrap.py`, `seed.py`, `setup_advanced.py`, `setup_deep_security.py`) |
 | `docs/` | Part-by-part guides, the fraud one-pager, the TODO checklist, troubleshooting |
