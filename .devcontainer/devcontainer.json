@@ -32,7 +32,7 @@
   },
 
   "onCreateCommand": "bash .devcontainer/setup_build.sh",
-  "postCreateCommand": "bash .devcontainer/setup_runtime.sh",
+  "postCreateCommand": "bash .devcontainer/provision.sh",
   "postStartCommand": "bash .devcontainer/start_app.sh",
   "postAttachCommand": "code README.md notebook_student.ipynb docs/part-1-setup.md",
 

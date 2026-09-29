@@ -32,7 +32,15 @@ SYS_OBJECT_GRANTS = [
 
 
 def ensure_agent_user(sys_conn, agent_user: str, agent_pass: str):
-    """Create the AGENT user if missing, then apply all grants idempotently."""
+    """Create the AGENT user if missing, then apply all grants idempotently.
+
+    When the user already exists the credentials are *converged* rather than left
+    alone: a volume carried over from another workshop (or a Codespace rebuild on
+    an existing volume) can hold a different password, and an account locked by
+    failed logins then blocks every layer above it — the harness, the notebook and
+    the app all fail on ORA-01017/ORA-28000 with no hint of the cause. Asserting
+    the workshop default here makes provisioning self-healing.
+    """
     with sys_conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) FROM all_users WHERE username = :u",
@@ -44,6 +52,11 @@ def ensure_agent_user(sys_conn, agent_user: str, agent_pass: str):
             print(f"  created user {agent_user}")
         else:
             print(f"  user {agent_user} already exists")
+            try:
+                cur.execute(f"ALTER USER {agent_user} IDENTIFIED BY {agent_pass} ACCOUNT UNLOCK")
+                print("  credentials converged to the workshop default (account unlocked)")
+            except oracledb.DatabaseError as e:
+                print(f"  could not converge credentials: {e}")
 
         for grant in AGENT_GRANTS:
             try:

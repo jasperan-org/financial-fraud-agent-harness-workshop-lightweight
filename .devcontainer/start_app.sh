@@ -1,7 +1,7 @@
 #!/bin/bash
 # postStartCommand — runs every time the Codespace starts.
-# Ensures Oracle is up, runs bootstrap if it hasn't been run yet (fresh container
-# without persistent volume), then launches backend + frontend in the background.
+# Provisions Oracle (idempotent, see provision.sh), then launches backend +
+# frontend in the background.
 #
 # Tolerant of partial failures: each step prints clear status, and the script
 # does NOT `set -e` so one bad step won't leave the user with neither service.
@@ -18,86 +18,24 @@ LOG_DIR="$WORKSPACE/.devcontainer/logs"
 mkdir -p "$LOG_DIR"
 
 # -----------------------------------------------------------------------------
-# 1. Oracle
+# 1. Oracle + provisioning — idempotent, so every Codespace open ends fully
+#    provisioned even if the database volume was recreated, the container was
+#    stopped, or a previous seed died half-way. A warm database costs a handful
+#    of SELECTs (see .devcontainer/provision.sh).
 # -----------------------------------------------------------------------------
 echo ""
-echo "[1/4] Ensuring Oracle is running..."
-if ! docker ps --format '{{.Names}}' | grep -q '^oracle-free$'; then
-  if docker ps -a --format '{{.Names}}' | grep -q '^oracle-free$'; then
-    echo "  oracle-free exists but stopped — starting..."
-    docker start oracle-free > /dev/null 2>&1
-  else
-    echo "  oracle-free doesn't exist — bringing up via compose..."
-    docker compose -f "$WORKSPACE/.devcontainer/docker-compose.yml" up -d oracle > /dev/null 2>&1
-  fi
-fi
-
-# Wait up to 3 minutes for the listener to come up
-echo "  waiting for Oracle to accept connections (up to 180s)..."
-ORACLE_OK=0
-for i in $(seq 1 36); do
-  if docker exec oracle-free healthcheck.sh > /dev/null 2>&1; then
-    echo "  Oracle ready ($((i * 5))s)."
-    ORACLE_OK=1
-    break
-  fi
-  sleep 5
-done
-
-if [ $ORACLE_OK -eq 0 ]; then
-  echo "  ERROR: Oracle did not become healthy in 180s."
-  echo "         Run:  docker logs oracle-free 2>&1 | tail -50"
+echo "[1/3] Provisioning Oracle (idempotent — only what is missing gets built)..."
+bash "$WORKSPACE/.devcontainer/provision.sh"
+if [ $? -ne 0 ]; then
+  echo "  ERROR: Oracle never came up. Run:  docker logs oracle-free"
   exit 1
-fi
-
-# -----------------------------------------------------------------------------
-# 2. Was bootstrap ever run on this Oracle? If not, run it now.
-#    (This handles a fresh container without a persistent volume, OR a Codespace
-#     where setup_runtime.sh failed half-way through.)
-# -----------------------------------------------------------------------------
-echo ""
-echo "[2/4] Checking that AGENT user + ONNX embedder exist..."
-
-python3 - <<'PYEOF'
-import sys
-try:
-    import oracledb
-    conn = oracledb.connect(user="AGENT", password="AgentPwd_2025", dsn="localhost:1521/FREEPDB1")
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM user_mining_models WHERE model_name = 'ALL_MINILM_L12_V2'")
-    has_embedder = cur.fetchone()[0] > 0
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'TOOLBOX'")
-    has_toolbox = cur.fetchone()[0] > 0
-    conn.close()
-    sys.exit(0 if (has_embedder and has_toolbox) else 1)
-except Exception:
-    sys.exit(1)
-PYEOF
-BOOTSTRAP_OK=$?
-
-if [ $BOOTSTRAP_OK -ne 0 ]; then
-  echo "  AGENT/ONNX/toolbox not in place — running bootstrap + seed + setup_advanced now..."
-  cd "$WORKSPACE/app"
-
-  # .env file required by config.py — create from example if missing
-  if [ ! -f "$WORKSPACE/app/.env" ]; then
-    cp "$WORKSPACE/app/.env.example" "$WORKSPACE/app/.env"
-  fi
-
-  python scripts/bootstrap.py 2>&1 | tee -a "$LOG_DIR/bootstrap.log"
-  python scripts/seed.py 2>&1 | tee -a "$LOG_DIR/seed.log"
-  python scripts/setup_advanced.py 2>&1 | tee -a "$LOG_DIR/setup_advanced.log"
-  python scripts/setup_deep_security.py 2>&1 | tee -a "$LOG_DIR/setup_deep_security.log"
-  cd "$WORKSPACE"
-else
-  echo "  AGENT user + ONNX embedder + toolbox table present."
 fi
 
 # -----------------------------------------------------------------------------
 # 3. Backend
 # -----------------------------------------------------------------------------
 echo ""
-echo "[3/4] Starting agent backend on :8000 (logs → $LOG_DIR/backend.log)..."
+echo "[2/3] Starting agent backend on :8000 (logs → $LOG_DIR/backend.log)..."
 
 pkill -f "python app.py" 2>/dev/null
 sleep 1
@@ -141,7 +79,7 @@ fi
 # 4. Frontend
 # -----------------------------------------------------------------------------
 echo ""
-echo "[4/4] Starting agent UI on :3000 (logs → $LOG_DIR/frontend.log)..."
+echo "[3/3] Starting agent UI on :3000 (logs → $LOG_DIR/frontend.log)..."
 
 # node_modules may not exist on a fresh container.
 if [ ! -d "$WORKSPACE/app/frontend/node_modules" ]; then
@@ -231,6 +169,6 @@ fi
 echo "  • Backend (API):   http://localhost:8000"
 echo "  • Notebook:        notebook_student.ipynb"
 echo ""
-echo "  Logs:              $LOG_DIR/{backend,frontend,npm-install,bootstrap,seed,setup_advanced}.log"
+echo "  Logs:              $LOG_DIR/{backend,frontend,npm-install,bootstrap,seed,setup_advanced,setup_deep_security}.log"
 echo "  Restart manually:  bash .devcontainer/start_app.sh"
 echo "============================================"
