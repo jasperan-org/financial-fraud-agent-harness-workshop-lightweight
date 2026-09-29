@@ -2,9 +2,8 @@
 """Validate the checked-in workshop notebooks.
 
 The 90-minute path keeps eight TODO stubs plus the in-cell TODO 1 prompt
-(`notebook_student.ipynb`) and an answer key (`notebook_complete.ipynb`). The
-reference notebooks (`notebook_complete_with_setup_code.ipynb`,
-`enterprise_data_agent.ipynb`) must parse and must not accidentally ship a stub.
+(`notebook_student.ipynb`) and an answer key (`notebook_complete.ipynb`). Both
+must parse, and neither may ship a credential or leave a stub in the answer key.
 
 Run from the repository root:
 
@@ -20,8 +19,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 STUDENT = ROOT / "notebook_student.ipynb"
 COMPLETE = ROOT / "notebook_complete.ipynb"
-FULL_SOURCE = ROOT / "notebook_complete_with_setup_code.ipynb"
-ORIGINAL = ROOT / "enterprise_data_agent.ipynb"
 
 REQUIRED_SYMBOLS = (
     "_scan_tables",
@@ -97,15 +94,13 @@ def main() -> int:
     if missing:
         raise ValueError(f"required workshop symbols are missing: {', '.join(missing)}")
 
-    for path in (STUDENT, COMPLETE, FULL_SOURCE, ORIGINAL):
-        notebook = load(path)
-        check_parses(path.name, notebook)
-        check_no_secrets(path.name, notebook)
+    check_parses(STUDENT.name, student)
+    check_parses(COMPLETE.name, complete)
+    check_no_secrets(STUDENT.name, student)
+    check_no_secrets(COMPLETE.name, complete)
 
     print(f"student: {len(student_sources)} cells, {len(stubs)} TODO stubs, {len(checkpoints)} checkpoints")
     print(f"complete: {len(complete_sources)} cells, no TODO stubs")
-    for path in (FULL_SOURCE, ORIGINAL):
-        print(f"{path.name}: parses cleanly")
     print("notebook validation passed")
     return 0
 

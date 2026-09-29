@@ -27,7 +27,6 @@ ROOT = Path(__file__).resolve().parent.parent
 NOTEBOOKS = {
     "student": ROOT / "notebook_student.ipynb",
     "complete": ROOT / "notebook_complete.ipynb",
-    "full_source": ROOT / "notebook_complete_with_setup_code.ipynb",
 }
 
 # Insertion indices (insert *before* this cell). Complete is the student pair
@@ -36,23 +35,16 @@ NOTEBOOKS = {
 ANCHORS = {
     "student":  {"oamp": 31, "similarity": 52, "context": 74, "dbfs": 83},
     "complete": {"oamp": 31, "similarity": 51, "context": 73, "dbfs": 82},
-    "full_source": {"oamp": 20, "similarity": 38, "context": 64, "dbfs": 43},
 }
 
 
-OAMP_MD = """## Concept check — what OAMP replaces (without vs with)
+OAMP_MD = """## Concept check — what OAMP replaces
 
-`oracleagentmemory` is not a thin database wrapper — it is the whole memory
-layer: **in-database vectors, threads, context cards, user/agent scoping,
-extraction, and provenance**, all as tables you can query with SQL.
+`oracleagentmemory` is the whole memory layer — in-database vectors, threads, context cards, user/agent scoping, extraction, provenance — as tables you can query with SQL.
 
-**Try it both ways.** The cell below keeps a "memory" in a Python dict and
-matches it by keyword — then stores the same fact through OAMP and searches by
-*meaning*. Watch the second lookup succeed on a rephrased question that shares
-no words with the stored fact.
+Below: the same fact kept in a Python dict and matched by keyword, then stored through OAMP and found by *meaning* on a rephrased question.
 
-<!-- workshop:concept-demo:oamp -->
-"""
+<!-- workshop:concept-demo:oamp -->"""
 
 OAMP_CODE = '''# ============================================================================
 # WITHOUT OAMP vs WITH OAMP — the memory layer you would otherwise build yourself
@@ -99,16 +91,11 @@ print("      scoped to user/agent, and reusable from any later turn or process."
 '''
 
 
-SIM_MD = """## Concept check — retrieval without vectors (without vs with)
+SIM_MD = """## Concept check — retrieval without vectors
 
-Before the three-way probe, prove the point of the vector leg: a plain
-substring lookup cannot answer a question that shares no words with the stored
-fact. The cell below runs the naive `LIKE` baseline, then the
-`retrieve_knowledge()` you implemented in **TODO 4** — same question, and only
-one of them finds `FINANCE.TRANSACTIONS.AMOUNT_CENTS`.
+A substring (`LIKE`) lookup cannot answer a question that shares no words with the stored fact. Below: the naive baseline, then `retrieve_knowledge()` from **TODO 4** — same question, one of them finds `FINANCE.TRANSACTIONS.AMOUNT_CENTS`.
 
-<!-- workshop:concept-demo:similarity -->
-"""
+<!-- workshop:concept-demo:similarity -->"""
 
 SIM_CODE = '''# ============================================================================
 # WITHOUT similarity search vs WITH it — the functions from TODO 4 / 3.4
@@ -137,17 +124,11 @@ print("   -> the right fact surfaces with zero shared words, because the match i
 '''
 
 
-CTX_MD = """## Concept check — context summarization (without vs with)
+CTX_MD = """## Concept check — context summarization
 
-`build_context()` is only half the story: OAMP also maintains a **rolling
-context card** per thread (`enable_context_summary=True`, refreshed every
-`context_summary_update_frequency` turns). Without it, every turn must replay
-the raw transcript; with it, the thread stays bounded and earlier decisions
-survive. The cell below writes four corrections to a throwaway thread and
-contrasts the raw transcript against the generated card.
+`build_context()` is half the story: OAMP also keeps a **rolling context card** per thread (`enable_context_summary=True`, refreshed every `context_summary_update_frequency` turns), so a long thread does not replay its raw transcript every turn. Below: four corrections on a throwaway thread, raw transcript vs generated card.
 
-<!-- workshop:concept-demo:context -->
-"""
+<!-- workshop:concept-demo:context -->"""
 
 CTX_CODE = '''# ============================================================================
 # WITHOUT context summarization vs WITH it — OAMP's context card
@@ -187,17 +168,11 @@ print("   lets a long thread stay inside the context window without losing what 
 '''
 
 
-DBFS_MD = """## Concept check — DBFS scratch state (without vs with)
+DBFS_MD = """## Concept check — DBFS scratch state
 
-The agent needs scratch space mid-task: SQL drafts, findings logs, evidence
-packs. The cell below keeps a draft in a Python variable (not transactional,
-invisible to other sessions, lost on restart) and then writes the same bytes
-into **Oracle DBFS** — a filesystem *inside* the database, with the same ACID
-guarantees as the memory tables. It reads the bytes back through a **second
-connection** to prove the write really committed.
+Mid-task scratch space is a real problem: a Python variable is not transactional, invisible to other sessions, and gone on restart. Below: a draft in a Python variable, then the same bytes written to **Oracle DBFS** — a filesystem inside the database — and read back through a second connection.
 
-<!-- workshop:concept-demo:dbfs -->
-"""
+<!-- workshop:concept-demo:dbfs -->"""
 
 DBFS_CODE = '''# ============================================================================
 # WITHOUT DBFS vs WITH DBFS — durable, transactional scratch state

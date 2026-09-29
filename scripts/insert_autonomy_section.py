@@ -10,11 +10,11 @@ generated cells — then run from the repository root:
 
 Targets:
 
-    notebook_student.ipynb                    orientation + preflight + Part 12
-    notebook_complete.ipynb                   orientation + preflight + Part 12
-    notebook_complete_with_setup_code.ipynb   Part 12 only (that notebook runs
-                                              its own Oracle setup, so the
-                                              Codespaces orientation would lie)
+    notebook_student.ipynb     preflight + Part 12 (+ the kernel-check cell)
+    notebook_complete.ipynb    the same blocks, in the answer key
+
+Notebook outputs are preserved: the generator only ever rewrites the cells
+inside its sentinels, so an executed notebook stays executed.
 """
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ ROOT = Path(__file__).resolve().parent.parent
 
 STUDENT = ROOT / "notebook_student.ipynb"
 COMPLETE = ROOT / "notebook_complete.ipynb"
-FULL_SOURCE = ROOT / "notebook_complete_with_setup_code.ipynb"
 
 BEGIN = "<!-- workshop:{name}:begin -->"
 END = "<!-- workshop:{name}:end -->"
@@ -58,10 +57,10 @@ def find_cell(cells: list[dict], needle: str) -> int:
     return hits[0]
 
 
-def replace_block(cells: list[dict], name: str, new_cells: list[dict], at: int) -> list[dict]:
-    """Remove any existing block with this name, then insert the fresh cells at `at`."""
+def _without_block(cells: list[dict], name: str) -> tuple[list[dict], list[dict]]:
+    """Return (cells outside the block, cells inside it)."""
     begin, end = BEGIN.format(name=name), END.format(name=name)
-    kept, dropping = [], False
+    kept, inner, dropping = [], [], False
     for cell in cells:
         source = "".join(cell["source"])
         if begin in source:
@@ -70,12 +69,31 @@ def replace_block(cells: list[dict], name: str, new_cells: list[dict], at: int) 
         if dropping:
             if end in source:
                 dropping = False
+            else:
+                inner.append(cell)
             continue
         kept.append(cell)
     if dropping:
         raise SystemExit(f"unterminated {name} block")
-    at = min(at, len(kept))
-    return kept[:at] + new_cells + kept[at:]
+    return kept, inner
+
+
+def merge_block(name: str, new_cells: list[dict], previous: list[dict]) -> list[dict]:
+    """Wrap `new_cells` in the block's sentinels, keeping unchanged cells as they are.
+
+    A cell whose source is identical to the one it replaces keeps its old cell
+    object — and with it its outputs and execution count — so re-running this
+    generator on an executed notebook does not throw away results. A cell whose
+    source changed comes back unexecuted, which is the only honest state for it.
+    """
+    merged = []
+    for index, cell in enumerate(new_cells):
+        old = previous[index] if index < len(previous) else None
+        if old is not None and old["cell_type"] == cell["cell_type"] and old["source"] == cell["source"]:
+            merged.append(old)
+        else:
+            merged.append(cell)
+    return block(name, merged)
 
 
 def replace_text(cells: list[dict], needle: str, replacement: str) -> None:
@@ -88,69 +106,13 @@ def replace_text(cells: list[dict], needle: str, replacement: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# Orientation block — Codespaces quick start, contents, self-check
+# Self-check cell (the notebook's first runnable cell)
 # --------------------------------------------------------------------------
-ORIENTATION = """## Start here — Codespaces quick start
-
-**Nothing to install. No Oracle DDL to run.** This Codespace already booted Oracle AI Database 26ai, created the `AGENT` user, loaded the in-database ONNX models, and seeded the Meridian Bank `FINANCE` schema (`app/scripts/bootstrap.py` → `seed.py` → `setup_advanced.py`). Pick a kernel and run.
-
-| Step | What to do |
-|---|---|
-| **1 · Kernel** | Command Palette (`Ctrl/Cmd+Shift+P`) → **Notebook: Select Notebook Kernel** → **Python 3.11** (`/usr/local/bin/python`). The wrong kernel is the #1 cause of a red first cell — the symptom is `ModuleNotFoundError: No module named 'oracledb'`. See `images/select_kernel.png`. |
-| **2 · Run order** | Run top to bottom with `Shift+Enter`. §0.1 self-checks the kernel, §1.3 preflights the database, then the five blocks build the harness in order. |
-| **3 · Expect stops** | In the student notebook, the eight TODO stubs raise the moment you reach them and each TODO has a **hard-stop assert** below it — **`Run All` is supposed to halt; that is the workshop.** The answer key, [`notebook_complete.ipynb`](notebook_complete.ipynb), runs straight through. |
-| **4 · Terms** | `AGENT` = the schema the harness owns (memory, `toolbox`, `skillbox`, triage ledger). `FINANCE` = the bank's data, read-only for the agent. "Block N of 5" is the notebook's build order; "Part N" matches the deep-dive guides in `docs/`. |
-
-**Time budget** — the nine TODOs are the 90-minute core; the Part 12 capstone adds ~15:
-
-| Section | ~Time | You get |
-|---|---|---|
-| Part 1 — setup + preflight | 8 min | A proven Codespace: Oracle reachable, `FINANCE` seeded, models loaded |
-| Part 2 — memory + scanner | 20 min | **TODOs 2–3** — the agent reads the schema into OAMP |
-| Part 3 — retrieval | 20 min | **TODOs 4–5** — semantic, keyword, and hybrid RRF retrieval |
-| Part 6 — tools + skills | 25 min | **TODOs 6–8** — vector-indexed toolbox + skillbox, safe SQL |
-| Part 7 — the loop | 20 min | **TODO 9** — `agent_turn`, the harness keystone |
-| Part 12 — autonomy *(capstone)* | 15 min | The harness works Meridian Bank's AML alert queue and reports the impact |
-
-**Re-running is safe.** Scan facts upsert on `(kind, subject)` with a `body_hash` check; the triage ledger upserts on `(customer, typology)`; nothing in the app or in `FINANCE` is written. After a Codespace restart, re-run from the top — the first cells reconnect and reuse everything already in Oracle.
-
-**The app is already running.** Open **http://localhost:3000** — the same harness, the same Oracle, the same memory store this notebook writes to. Backend health: `curl http://localhost:8000/api/health`.
-
-```bash
-# Terminal (Ctrl+`) — recovery, in order of escalation
-docker ps                                 # is oracle-free healthy?
-bash .devcontainer/start_app.sh           # restart backend + front end
-curl http://localhost:8000/api/health     # what the app thinks of its own state
-tail -60 .devcontainer/logs/backend.log   # and why it thinks that
-```
-
-| First-run symptom | Fix |
-|---|---|
-| `ModuleNotFoundError: No module named 'oracledb'` | Wrong kernel — select **Python 3.11** (`/usr/local/bin/python`). Do not `pip install`. |
-| `DPY-6005: cannot connect to database` | Oracle is still starting (first boot is 5–8 min) or stopped. `docker ps`, then `bash .devcontainer/start_app.sh`. |
-| `❌ TODO 3: _scan_tables returned no facts.` | `FINANCE` isn't seeded: `cd app && python scripts/bootstrap.py && python scripts/seed.py`. |
-| `401` / `AuthenticationError` at TODO 1 | No OCI GenAI key. Add `OCI_GENAI_API_KEY` as a **Codespaces secret** (then restart the Codespace), or `echo 'OCI_GENAI_API_KEY=...' >> app/.env`. |
-| Port 3000 says "can't connect" | The UI is still building or the preview opened before Vite bound. Check the **PORTS** tab and reload; `tail -40 .devcontainer/logs/frontend.log`. |
-
-More: [`docs/troubleshooting.md`](docs/troubleshooting.md) · checklist: [`docs/TODO-checklist.md`](docs/TODO-checklist.md) · full guide: [`README.md`](README.md)."""
 
 
-CONTENTS = """## Contents
+SELF_CHECK_MD = """## 0.1 Run this first — kernel check
 
-| # | Section | What it is |
-|---|---|---|
-| 0 | [§0.1 kernel check + the running app](#01-run-me-first--kernel-check-and-the-running-app) | Orientation; do this first |
-| 1 | [Part 1 — Setup](#part-1--setup) | Connectivity + the bare model · **TODO 1** |
-| 2 | [Part 2 — Long-Term Memory with OAMP](#part-2--long-term-memory-with-oamp) | Memory + the catalog scanner · **TODOs 2–3** |
-| 3 | [Part 3 — Retrieval](#part-3--retrieval) | Vector, keyword, and hybrid RRF · **TODOs 4–5** |
-| 4 | [Part 6 — Toolbox & Skillbox](#part-6--toolbox--skillbox) | Tool registry + safe SQL + skills · **TODOs 6–8** |
-| 5 | [Part 7 — Context Engineering & the Agent Loop](#part-7--context-engineering--the-agent-loop) | `agent_turn` — the keystone · **TODO 9** |
-| 6 | [Part 12 — The bank's morning: an autonomous AML triage](#part-12--the-banks-morning-an-autonomous-aml-triage) | Capstone: decide, record, measure impact *(no TODO)* |
-
-Part numbers match the guides in [`docs/`](docs/). Parts 1–3, 6, 7 and 12 are the notebook's own path; Parts 4, 5, 8, 9 and 11 are reference material that stays in [`notebook_complete_with_setup_code.ipynb`](notebook_complete_with_setup_code.ipynb) and [`enterprise_data_agent.ipynb`](enterprise_data_agent.ipynb)."""
-
-
-SELF_CHECK_MD = """## 0.1 Run me first — kernel check and the running app"""
+Confirms the notebook kernel has the workshop dependencies and prints the URL of the running app. If it fails with `ModuleNotFoundError: No module named 'oracledb'`, the kernel is wrong: Command Palette → **Notebook: Select Notebook Kernel** → **Python 3.11** (`/usr/local/bin/python`)."""
 
 
 SELF_CHECK = '''# §0.1 — Run me first: kernel check + where the running app lives.
@@ -182,13 +144,9 @@ print("  If the preview did not open, use the PORTS tab.")'''
 # --------------------------------------------------------------------------
 # Preflight block — inserted right after the AGENT connection cell
 # --------------------------------------------------------------------------
-PREFLIGHT_MD = """## 1.3 Preflight — is this Codespace actually ready?
+PREFLIGHT_MD = """## 1.3 Preflight — is this Codespace ready?
 
-A dozen fast queries, one table of results. Every ❌ prints the command that fixes it. The two things the
-rest of the notebook cannot work without — a seeded `FINANCE` schema and the in-database embedder —
-raise instead of warning, because Blocks 2–5 all sit on them.
-
-If everything is green here, Parts 2–12 will run."""
+Twelve checks in one table: the `FINANCE` seed, the ONNX embedder and reranker, the Oracle Text index, `toolbox` / `skillbox`, the API keys. Every ❌ prints the command that fixes it; the two checks the rest of the notebook cannot survive raise instead of warning."""
 
 
 PREFLIGHT_CODE = '''# §1.3 — Preflight. Reads the same catalogs the agent will scan, and the same env the
@@ -307,31 +265,18 @@ print("\\n✅ Preflight passed — every block below has what it needs.")'''
 # --------------------------------------------------------------------------
 P12_INTRO_MD = """# Part 12 — The bank's morning: an autonomous AML triage
 
-> 📖 **Guide:** [`docs/part-12-autonomous-aml-triage.md`](docs/part-12-autonomous-aml-triage.md)
->
-> ▶️ **No TODO in this part — run it.** It exercises the harness you built above.
-> ~15 minutes: three alerts, each a real model round-trip inside the bounded loop.
+> 📖 Guide: [`docs/part-12-autonomous-aml-triage.md`](docs/part-12-autonomous-aml-triage.md) · ▶️ **no TODO — run it.** ~15 minutes, three alerts, each a full model round-trip.
 
-Parts 1–7 built a *responsive* harness: a human asks, the agent answers. That is a query tool.
-A compliance desk does not work that way. Alerts arrive on their own schedule, and somebody has to
-decide — every single one — whether the bank files, investigates, or closes the case with a reason
-an examiner would accept.
-
-**Autonomy here is four concrete properties, and you can point at each one in this part:**
+Parts 1–7 built a harness that answers questions. A compliance desk does not work that way: alerts arrive on their own schedule and every one needs a decision the bank can defend. Autonomy here is four concrete properties:
 
 | Property | Where it lives |
 |---|---|
-| **A trigger, not a prompt** — the run starts from queued data | §12.3 builds the alert queue from `FINANCE` |
-| **A decision with a stated reason** — not a summary of rows | §12.5–12.6 → a validated decision record |
-| **A durable record a human can replay** | `AGENT.AML_TRIAGE` rows + `case_decision` memories |
-| **A budget and a boundary** | metered model calls, ≤6 iterations / 120 s per alert, `ESCALATE` *recommends* — it never files |
+| **A trigger, not a prompt** | §12.3 builds the queue from `FINANCE` |
+| **A decision with a stated reason** | §12.5–12.6 — a validated decision record |
+| **A record a human can replay** | `AGENT.AML_TRIAGE` rows + `case_decision` memories |
+| **A budget and a boundary** | metered model calls, ≤6 iterations / 120 s per alert, `ESCALATE` only recommends |
 
-What stays out of the agent's hands, on purpose: it cannot write to `FINANCE`, it cannot file a SAR,
-and it cannot see this queue at all from a persona without clearance (that boundary is Part 8 in
-[`docs/part-8-deep-data-security.md`](docs/part-8-deep-data-security.md)).
-
-The question this part answers for the business: **if the harness worked the queue every morning,
-what would it decide — and what would that be worth?** §12.8 computes the answer from the database."""
+The agent cannot write to `FINANCE`, cannot file a SAR, and cannot see this queue at all without clearance ([Part 8](docs/part-8-deep-data-security.md)). The question §12.8 answers: if the desk ran every morning, what would it decide — and what would that be worth?"""
 
 
 P12_GATE_CODE = '''# Part 12 uses the harness you built above. Fail here with one clear message instead of
@@ -348,45 +293,34 @@ print("✅ harness present:", ", ".join(_PARTS_REQUIRED))'''
 
 P12_DATA_MD = """## 12.1 What an alert is — the fraud data, in one screen
 
-Everything below starts from three columns and one table:
-
 | Where | What it holds | Why the agent cares |
 |---|---|---|
-| `FINANCE.transactions.status` | `COMPLETED` / `FLAGGED` / `BLOCKED` | The bank's own rules already fired — this *is* the queue |
-| `FINANCE.transactions.flag_reason` | which AML typology fired | Turns a transaction row into an investigation |
+| `FINANCE.transactions.status` | `COMPLETED` / `FLAGGED` / `BLOCKED` | the bank's own rules already fired — this *is* the queue |
+| `FINANCE.transactions.flag_reason` | which AML typology fired | turns a row into an investigation |
 | `FINANCE.transactions.amount_cents` | integer USD **cents** | ÷100; the seed plants this trap deliberately |
-| `FINANCE.sar_reports` | what compliance already filed | Prior history changes today's decision |
-
-The five seeded typologies ([`docs/fraud-detection-onepager.md`](docs/fraud-detection-onepager.md)):
+| `FINANCE.sar_reports` | what compliance already filed | prior history changes today's decision |
 
 | `flag_reason` | Pattern the seed plants |
 |---|---|
-| `STRUCTURING` | Cash deposits just under the $10,000 CTR threshold, repeated in a short window |
-| `GEO_VELOCITY` | One card, two far-apart regions, hours apart (plus one `BLOCKED` attempt) |
-| `HIGH_RISK_COUNTRY` | Wires to elevated-risk corridors right after an inbound credit |
-| `RAPID_CASH_OUT` | Inbound wire, then ATM withdrawals within ~48 hours |
-| `LARGE_CASH_DEPOSIT` | A single cash deposit above $50,000 |
+| `STRUCTURING` | deposits just under the $10,000 CTR threshold, repeated |
+| `GEO_VELOCITY` | one card, two far-apart regions, hours apart |
+| `HIGH_RISK_COUNTRY` | wires to elevated-risk corridors after an inbound credit |
+| `RAPID_CASH_OUT` | inbound wire, then ATM withdrawals within ~48 hours |
+| `LARGE_CASH_DEPOSIT` | a single cash deposit above $50,000 |
 
-**A transaction is not an alert.** A row says *"this deposit was $9,983"*. An alert says *"this
-customer made nine deposits between $8,000 and $9,999 in two weeks, across ATM and branch channels,
-and already has a SAR under review."* Deciding on single transactions means deciding on noise;
-deciding on the customer-scoped bundle is what an AML desk actually does, and §12.3 builds that
-bundle in SQL — including the two pieces of context a single flagged row can never carry: what the
-rest of the account was doing, and what the bank already knows about the customer."""
+A transaction is not an alert: *"this deposit was $9,983"* is noise, while *"nine deposits between $8,000 and $9,999 in two weeks, plus a SAR under review"* is a case. §12.3 builds that customer-scoped bundle in SQL."""
 
 
 P12_LEDGER_MD = """## 12.2 The triage ledger — the harness's own bookkeeping
 
-Each decision lands in two places, because they are read by two different audiences:
+Each decision lands in two places, because two audiences read it:
 
 | Store | Shape | Who reads it |
 |---|---|---|
-| `AGENT.AML_TRIAGE` (this section) | one row per `(customer, typology)`: decision, confidence, rationale, evidence window | an examiner or a SQL dashboard — structured, queryable, auditable |
-| OAMP memories, `kind="case_decision"` (§12.6) | the same decision as a sentence | **the agent itself**, next morning — semantic recall, not a key lookup |
+| `AGENT.AML_TRIAGE` | one row per `(customer, typology)`: decision, confidence, rationale, evidence window | an examiner or a SQL dashboard |
+| OAMP memories, `kind="case_decision"` | the same decision as a sentence | **the agent itself**, next morning |
 
-This is the same split the app uses for `scan_history`: the harness owns its state, in its own schema,
-beside the memory tables. Note what is *not* happening — no writes to `FINANCE`, ever. The agent's
-write surface is the `AGENT` schema only, which is the trust boundary from Part 1 made literal."""
+Note what is *not* happening: no writes to `FINANCE`, ever. The write surface is the `AGENT` schema — the trust boundary from Part 1, made literal."""
 
 
 P12_LEDGER_CODE = '''# §12.2 — The ledger (created once) + two helpers the cells below share.
@@ -437,23 +371,15 @@ print(f"ledger: {_ledger_rows} decision(s) on record")
 print("decision vocabulary: ESCALATE · KYC_REVIEW · DISMISS · REVIEW_REQUIRED — set by the harness, never by the model")'''
 
 
-P12_QUEUE_MD = """## 12.3 The alert queue — autonomy starts with a trigger, not a prompt
+P12_QUEUE_MD = """## 12.3 The alert queue — a trigger, not a prompt
 
-Nobody types a question here. The run starts from the data: every customer with `FLAGGED` /
-`BLOCKED` activity inside the lookback window, grouped by typology, ordered by risk rating and
-exposure. Three knobs decide the run:
+The run starts from the data: every customer with `FLAGGED` / `BLOCKED` activity inside the lookback window, grouped by typology, ordered by risk rating and exposure. Three knobs:
 
 - **`ALERT_LOOKBACK_DAYS`** — how far back "incoming" reaches.
-- **`TRIAGE_LIMIT`** — how many alerts this run works (raise it once the first pass works).
-- **`IGNORE_WATERMARK`** — set it to **`False`** and the desk becomes incremental: it only works
-  alerts whose newest flagged transaction is newer than the last recorded run
-  (`MAX(window_end)` in the ledger). That is what makes a morning job a *job* instead of a
-  re-enactment — a second run in the same window reports **0 new alerts**, honestly.
+- **`TRIAGE_LIMIT`** — how many alerts this run works.
+- **`IGNORE_WATERMARK`** — set it to `False` and the desk only works alerts newer than the last recorded run, so a second run in the same window honestly reports **0 new alerts**.
 
-The seeded bank has **130+ alerts** across the five typologies. They are true positives *by
-construction* — the seed plants the patterns — so expect an ESCALATE-heavy first run. A production
-queue is the mirror image (90 %+ of alerts are explainable), which is precisely why the harness has
-to write the dismissal down: the cheap decision is only cheap if the reason survives review."""
+The seeded bank has **130+ alerts**, true positives by construction, so expect an ESCALATE-heavy first run. A production queue is the mirror image — which is why a dismissal has to be written down with a reason."""
 
 
 P12_QUEUE_CODE = '''# §12.3 — Build the queue. This is the "incoming data" the desk reacts to.
@@ -509,15 +435,7 @@ for a in _queue[:TRIAGE_LIMIT]:
 
 P12_EVIDENCE_MD = """## 12.4 The evidence pack — what the model is allowed to see
 
-An AML decision is only as good as the bundle in front of the analyst. Ours is assembled in SQL and
-it is the *only* thing the model receives: the alert header, the flagged transactions, the recent
-activity that gives them meaning (the inbound wire before the cash-out, the merchant names behind a
-high-risk corridor), the account history, and the prior SARs.
-
-That is the harness doing its job — the model does not get to *choose* its evidence on the happy
-path; it only gets to ask for more (`search_knowledge`, `run_sql`) inside its budget. Print one pack
-and read it line by line: every decision later in this notebook is traceable back to lines like
-these, which is exactly what "auditable" has to mean."""
+Assembled in SQL, and the *only* thing the model receives: the alert header, the flagged transactions, the surrounding activity that gives them meaning (the inbound wire before the cash-out, the merchants behind a high-risk corridor), the account history, and the prior SARs. The model does not get to choose its evidence on the happy path — it can only ask for more (`search_knowledge`, `run_sql`) inside its budget. Every decision later in this part is traceable back to lines like these."""
 
 
 P12_EVIDENCE_CODE = '''# §12.4 — Assemble one alert bundle from SQL. Show the first alert the run will work.
@@ -618,22 +536,16 @@ print(f"\\n[{len(_sample_pack.splitlines())} lines, {len(_sample_pack)} chars �
 
 P12_POLICY_MD = """## 12.5 The decision policy — three verbs and a JSON contract
 
-The bank's policy, not the model's mood:
-
 | Decision | What it authorises | What drives it |
 |---|---|---|
-| `ESCALATE` | Recommend a SAR (new, or an update to an open one) | Repetition, blocked attempts, prior SAR, threshold proximity |
-| `KYC_REVIEW` | Investigate before filing — source-of-funds request, KYC refresh | A real signal on thin evidence |
-| `DISMISS` | Close the alert **with a written reason** an examiner would accept | Activity explained by legitimate behaviour |
+| `ESCALATE` | recommend a SAR (new, or an update to an open one) | repetition, blocked attempts, prior SAR, threshold proximity |
+| `KYC_REVIEW` | investigate before filing — source-of-funds request, KYC refresh | a real signal on thin evidence |
+| `DISMISS` | close the alert **with a written reason** an examiner would accept | activity explained by legitimate behaviour |
 
-The model returns JSON; the harness validates it. Two rules are worth reading in the code below:
+The model returns JSON; the harness validates it. Two rules matter:
 
-1. A decision outside the vocabulary becomes **`REVIEW_REQUIRED`** — a human works it. Not an
-   exception, not a silent pass-through, and not a guess.
-2. A `sar_reason_code` outside the bank's five typologies falls back to the alert's own typology.
-   *The model owns the reasoning; the harness owns the enum.*
-
-That division is the whole pattern: the model is trusted with judgement and never with state."""
+1. A decision outside the vocabulary becomes **`REVIEW_REQUIRED`** — a human works it. Not an exception, not a silent pass-through.
+2. An unknown `sar_reason_code` falls back to the alert's own typology. *The model owns the reasoning; the harness owns the enum.*"""
 
 
 P12_POLICY_CODE = '''# §12.5 — The policy the model works under, and the validator that enforces it.
@@ -713,19 +625,9 @@ print("✅ decision validator holds: unknown decisions become REVIEW_REQUIRED, c
 
 P12_TRIAGE_MD = """## 12.6 `triage_alert` — the decision, recorded
 
-One alert in, one ledger row and one memory out. Notice that the function reuses **`agent_turn`** —
-the loop from TODO 9 — unchanged: same context assembly, same tool dispatch, same iteration and
-wall-clock budgets. **Autonomy is not a different loop.** It is the same loop with a trigger and a
-record.
+One alert in, one ledger row and one memory out. The function reuses **`agent_turn`** — the loop from TODO 9 — unchanged: same context assembly, same tool dispatch, same budgets. **Autonomy is not a different loop**; it is the same loop with a trigger and a record.
 
-Three details in the code below are the difference between a demo and something a bank could run:
-
-1. The triage instruction travels in the **user message**, not in a rewritten system prompt — the loop
-   stays reusable; only the job description changes. And because the thread keeps its memories, alert
-   #3 is triaged by an agent that remembers what it decided on alerts #1 and #2.
-2. Every decision is written **twice on purpose**: a row in `AML_TRIAGE` (structured — for the
-   examiner) and an OAMP memory tagged `kind="case_decision"` (semantic — for the agent's next run).
-3. Model calls are **metered** from here on, so §12.8 can report what autonomy actually cost."""
+Three details are the difference between a demo and something a bank could run: the triage instruction travels in the **user message** (so the loop stays reusable, and the thread remembers the alerts it already worked); every decision is written **twice on purpose** (`AML_TRIAGE` for the examiner, a `case_decision` memory for the agent's next run); and model calls are **metered** so §12.8 can report what autonomy cost."""
 
 
 P12_TRIAGE_CODE = '''# §12.6 — Meter the model, then work one alert end to end.
@@ -799,13 +701,7 @@ print("triage_alert ready — agent_turn decides, the ledger and OAMP memory rec
 
 P12_RUN_MD = """## 12.7 Run it — the bank's morning queue
 
-Three alerts by default (`TRIAGE_LIMIT` in §12.3), each one a full model round-trip inside the
-bounded loop. The run prints a line per alert with the decision, the confidence, and the reason —
-then dumps the ledger exactly as an examiner's SQL client would read it.
-
-A failure inside one alert never kills the run: the harness records it, prints it, and moves to the
-next alert. That is not defensive padding — it is the difference between "the desk ran" and "the desk
-stopped because one customer's data was odd"."""
+Three alerts by default, each a full model round-trip inside the bounded loop. The run prints one line per alert — decision, confidence, reason — then dumps the ledger as an examiner's SQL client would read it. A failure inside one alert is recorded and the run moves on: the difference between "the desk ran" and "the desk stopped because one customer's data was odd"."""
 
 
 P12_RUN_CODE = '''# §12.7 — Work the queue and print the ledger.
@@ -852,14 +748,9 @@ for row in _rows("""
 
 P12_IMPACT_MD = """## 12.8 The impact board — what this is worth to Meridian Bank
 
-An AML programme is measured on a short list: **alerts worked, time-to-decision, filings made,
-evidence that survives an examination**, and what it costs in people to produce all three. The board
-below computes those numbers from the ledger and `FINANCE`.
+An AML programme is measured on a short list: alerts worked, time-to-decision, filings made, evidence that survives an examination — and what it costs in people to produce all three. The board computes those numbers from the ledger and `FINANCE`.
 
-One number cannot come from the database, so it is a labelled knob: `MANUAL_MINUTES_PER_ALERT`
-(manual alert triage plus the case note). Everything above that row is computed — alerts, exposure,
-confidence, model calls, wall-clock — and the last block states plainly what the harness did **not**
-do."""
+One input cannot come from the database, so it is a labelled knob: `MANUAL_MINUTES_PER_ALERT` (45 by default — change it and re-run). Everything above that row is computed, and the last block states plainly what the harness did **not** do."""
 
 
 P12_IMPACT_CODE = '''# §12.8 — The morning briefing, computed from the ledger + FINANCE.
@@ -910,12 +801,7 @@ print("The recommendation is a decision record; a human signs the filing. That b
 
 P12_LOOP_MD = """## 12.9 Close the loop — the agent remembers its own decisions
 
-The decisions are now memories (`kind="case_decision"`), not just rows. So the same `agent_turn`
-can answer questions *about its own morning* — which is the difference between a decision log and a
-colleague who was there.
-
-Ask it something that only the memory layer can answer. Watch `search_knowledge` fire, and note that
-the answer is grounded in the rationales it wrote minutes ago — not re-derived from SQL."""
+The decisions are memories (`kind="case_decision"`), not just rows, so the same `agent_turn` can answer questions about its own morning — which is the difference between a decision log and a colleague who was there. Watch `search_knowledge` fire: the answer is grounded in the rationales it wrote minutes ago, not re-derived from SQL."""
 
 
 P12_LOOP_CODE = '''# §12.9 — Ask the agent about its own triage run. No new SQL: this is memory recall.
@@ -928,56 +814,42 @@ print("\\nAGENT:", agent_turn(_question, thread_id=TRIAGE_THREAD, max_iterations
 
 P12_NEXT_MD = """## 12.10 From one morning to a running programme
 
-What you ran by hand, the bank would run on a schedule:
-
 | Next step | How, in this stack |
 |---|---|
-| **Run it every morning** | A `DBMS_SCHEDULER` job, exactly like the app's scan scheduler (`app/backend/db/scheduler_setup.py`) — the queue, the decisions, and the ledger are already SQL |
-| **Make it incremental** | `IGNORE_WATERMARK = False` in §12.3: only alerts newer than the last run. The second run of the day says *"0 new alerts"* instead of re-triaging the book |
-| **Keep a human in the loop** | `REVIEW_REQUIRED` already routes unvalidated output to a person; sampling a percentage of `DISMISS` decisions is the standard control |
-| **Watch precision, not volume** | Decisions are rows: `SELECT decision, COUNT(*) FROM aml_triage GROUP BY decision` is the programme's false-positive rate over time |
-| **Prove it to an examiner** | Every row carries its evidence window, rationale, and confidence; the same text is retrievable from OAMP. Replay the decision, not the demo |
-| **Scope it by identity** | Run the desk as `compliance.officer` vs `analyst.east` and the same queue returns different rows — the kernel decides, not the prompt ([Part 8](docs/part-8-deep-data-security.md)) |
+| **Run it every morning** | a `DBMS_SCHEDULER` job, like the app's scan scheduler (`app/backend/db/scheduler_setup.py`) |
+| **Make it incremental** | `IGNORE_WATERMARK = False` in §12.3 — the second run of the day reports **0 new alerts** |
+| **Keep a human in the loop** | `REVIEW_REQUIRED` already routes unvalidated output to a person; sample a percentage of `DISMISS` decisions |
+| **Watch precision, not volume** | `SELECT decision, COUNT(*) FROM aml_triage GROUP BY decision` is the false-positive rate over time |
+| **Prove it to an examiner** | every row carries its evidence window, rationale, and confidence — replayable from OAMP |
+| **Scope it by identity** | run the desk as `compliance.officer` vs `analyst.east` and the same queue returns different rows ([Part 8](docs/part-8-deep-data-security.md)) |
 
-The honest limits: a model that decides is a model that can be wrong at scale, the triage policy is
-only as good as the thresholds in it, and the seed's alert queue is true-positive-weighted by
-construction. What this part demonstrates is not that the agent is right — it is that its judgement
-arrives **with evidence, a reason, a record, and a budget**, which is the only form of autonomy a
-regulated business can actually deploy.
+The honest limits: a model that decides can be wrong at scale, the policy is only as good as its thresholds, and the seeded queue is true-positive-weighted. The claim is not that the agent is right — it is that its judgement arrives with **evidence, a reason, a record, and a budget**.
 
-**See it as a product:** open [http://localhost:3000](http://localhost:3000) — the app's persona
-switch, live memory pane, and World Explorer all run on the same store this notebook just wrote to."""
+**See it as a product:** [http://localhost:3000](http://localhost:3000) runs on the same store this notebook just wrote to."""
 
 
 CLOSING_MARKER = "# The capstone — decisions, not just answers"
 
 CLOSING_ADDITION = """# The capstone — decisions, not just answers
 
-**Part 12** turned the harness outward. Instead of waiting for a question, it worked Meridian Bank's
-AML alert queue end to end: built the queue from `FINANCE`, assembled the evidence, decided — with a
-reason and a confidence — and wrote every decision to `AGENT.AML_TRIAGE` and to memory, then reported
-what the run was worth to the bank.
+**Part 12** turned the harness outward: it worked Meridian Bank's AML alert queue end to end, decided with a reason and a confidence, wrote every decision to `AGENT.AML_TRIAGE` and to memory, and reported what the run was worth to the bank.
 
-It is the same loop you built in TODO 9. A **trigger**, a **record**, and a **budget** are what turn a
-chat window into something a compliance desk could run every morning. The model owned the judgement;
-the harness owned the state — and that split is what makes the autonomy auditable."""
+It is the same loop you built in TODO 9. A **trigger**, a **record**, and a **budget** are what turn a chat window into something a compliance desk could run every morning — and the split between the model's judgement and the harness's state is what makes it auditable."""
 
 
 # --------------------------------------------------------------------------
 # Notebook assembly
 # --------------------------------------------------------------------------
 def build_orientation() -> list[dict]:
-    return (block("start-here", [md(ORIENTATION)])
-            + block("contents", [md(CONTENTS)])
-            + block("self-check", [md(SELF_CHECK_MD), code(SELF_CHECK)]))
+    return [md(SELF_CHECK_MD), code(SELF_CHECK)]
 
 
 def build_preflight() -> list[dict]:
-    return block("preflight", [md(PREFLIGHT_MD), code(PREFLIGHT_CODE)])
+    return [md(PREFLIGHT_MD), code(PREFLIGHT_CODE)]
 
 
 def build_part12() -> list[dict]:
-    return block("part-12", [
+    return [
         md(P12_INTRO_MD), code(P12_GATE_CODE),
         md(P12_DATA_MD),
         md(P12_LEDGER_MD), code(P12_LEDGER_CODE),
@@ -989,12 +861,13 @@ def build_part12() -> list[dict]:
         md(P12_IMPACT_MD), code(P12_IMPACT_CODE),
         md(P12_LOOP_MD), code(P12_LOOP_CODE),
         md(P12_NEXT_MD),
-    ])
+    ]
 
 
 def drop_blocks(cells: list[dict], names: tuple[str, ...]) -> list[dict]:
+    """Remove these blocks (and their sentinels) from the notebook entirely."""
     for name in names:
-        cells = replace_block(cells, name, [], len(cells))
+        cells, _ = _without_block(cells, name)
     return cells
 
 
@@ -1007,45 +880,6 @@ def append_closing(cells: list[dict]) -> None:
     cells[index]["source"] = (head + "\n\n---\n\n" + CLOSING_ADDITION).splitlines(keepends=True)
 
 
-# The inserted §1.3 preflight takes the 1.3 slot; the pre-existing chat-client
-# section becomes 1.4 so the notebook has one predictable numbering.
-RENAMES = {
-    "## 1.3 Chat LLM client": "## 1.4 Chat LLM client",
-}
-
-
-# Sentence-level updates to the pre-existing notebook prose, applied wherever
-# the text appears (the notebooks are the source of that prose, so this keeps
-# the orientation cells honest when the dataset grows). Idempotent: once the
-# new text is in place the old string is gone and the loop is a no-op.
-TEXT_SUBSTITUTIONS = [
-    ("- The `FINANCE` schema (Meridian Bank) seeded with ~2,100 rows.",
-     "- The `FINANCE` schema (Meridian Bank) seeded with ~40,000 rows across 15 tables:"),
-    ("eight tables (branches, customers, accounts, cards, merchants, transactions, loans, sar_reports)",
-     "fifteen tables (branches, customers, accounts, cards, merchants, transactions, loans,\n"
-     "sar_reports, sanctions_screenings, beneficial_owners, wire_messages, login_events,\n"
-     "kyc_documents, case_notes, fx_rates)"),
-    ("~2,100 rows of realistic data", "~40,000 rows of realistic data"),
-]
-
-
-def apply_text_substitutions(cells: list[dict]) -> None:
-    for old, new in TEXT_SUBSTITUTIONS:
-        for cell in cells:
-            source = "".join(cell["source"])
-            if old in source:
-                cell["source"] = source.replace(old, new).splitlines(keepends=True)
-
-
-def apply_renames(cells: list[dict]) -> None:
-    for old, new in RENAMES.items():
-        for cell in cells:
-            source = "".join(cell["source"])
-            if source.lstrip().startswith(old):
-                cell["source"] = source.replace(old, new, 1).splitlines(keepends=True)
-                break
-
-
 def load(path: Path) -> dict:
     with path.open(encoding="utf-8") as handle:
         return json.load(handle)
@@ -1055,48 +889,39 @@ def save(path: Path, notebook: dict) -> None:
     path.write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def strip_outputs(cells: list[dict]) -> None:
-    for cell in cells:
-        if cell["cell_type"] == "code":
-            cell["execution_count"] = None
-            cell["outputs"] = []
 
 
 def update_lightweight(path: Path) -> None:
     notebook = load(path)
-    cells = drop_blocks(notebook["cells"], ("start-here", "contents", "self-check", "preflight", "part-12"))
+    cells = drop_blocks(notebook["cells"], ("start-here", "contents"))
+
+    # Pull the blocks we own out first — and remember what they held, so cells
+    # whose source did not change keep their outputs (see merge_block).
+    previous = {}
+    for name in ("self-check", "preflight", "part-12"):
+        cells, previous[name] = _without_block(cells, name)
 
     title_at = find_cell(cells, "# Financial Data Agent Workshop")
-    cells = cells[:title_at + 1] + build_orientation() + cells[title_at + 1:]
-    cells = replace_block(cells, "preflight", build_preflight(), find_cell(cells, CONNECT_ANCHOR) + 1)
-    cells = replace_block(cells, "part-12", build_part12(), find_cell(cells, CLOSE_ANCHOR))
+    cells = (cells[:title_at + 1] + merge_block("self-check", build_orientation(), previous["self-check"])
+             + cells[title_at + 1:])
+    connect_at = find_cell(cells, CONNECT_ANCHOR)
+    cells = (cells[:connect_at + 1] + merge_block("preflight", build_preflight(), previous["preflight"])
+             + cells[connect_at + 1:])
+    close_at = find_cell(cells, CLOSE_ANCHOR)
+    cells = (cells[:close_at] + merge_block("part-12", build_part12(), previous["part-12"])
+             + cells[close_at:])
     append_closing(cells)
-    apply_renames(cells)
-    apply_text_substitutions(cells)
 
-    strip_outputs(cells)
     notebook["cells"] = cells
     save(path, notebook)
     print(f"{path.name}: {len(cells)} cells")
 
 
-def update_full_source(path: Path) -> None:
-    notebook = load(path)
-    cells = drop_blocks(notebook["cells"], ("part-12",))
-    cells = replace_block(cells, "part-12", build_part12(), find_cell(cells, CLOSE_ANCHOR))
-    append_closing(cells)
-    apply_renames(cells)
-    apply_text_substitutions(cells)
-    strip_outputs(cells)
-    notebook["cells"] = cells
-    save(path, notebook)
-    print(f"{path.name}: {len(cells)} cells")
 
 
 def main() -> int:
     update_lightweight(STUDENT)
     update_lightweight(COMPLETE)
-    update_full_source(FULL_SOURCE)
     return 0
 
 

@@ -17,8 +17,8 @@ by:
     which is what the shipped Codespace runs).
 
 So there are two enforcement layers, and they cannot disagree: both are derived
-from the data below. See `docs/part-8-deep-data-security.md` and Part 8 of
-`enterprise_data_agent.ipynb`.
+from the data below. See `docs/part-8-deep-data-security.md` and
+`db/deep_security.py` (the installer lives in `scripts/setup_deep_security.py`).
 
 Personas in this file are tuned so that *every* commonly-viewed table changes
 visibly when you switch identities. That makes the security model legible at a
