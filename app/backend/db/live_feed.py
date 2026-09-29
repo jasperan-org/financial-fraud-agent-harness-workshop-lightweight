@@ -2,11 +2,15 @@
 activity into FINANCE so the app feels like a production system under real-time
 load.
 
-Every few seconds the feed inserts one new transaction (sometimes a fresh AML
-hit) and broadcasts it over Socket.IO as `live_txn`. The World panel pulses a
-marker at the transaction's merchant/branch, draws an arc from the account's
-home branch, and ticks a live counter — so the globe keeps moving even when the
-user isn't asking a question.
+Transaction arrivals follow a Poisson process whose mean gap tracks the hour
+of day (quiet overnight, busy mid-morning), with occasional bursts — so the
+feed reads like a real bank rather than a metronome. Whenever a flagged event
+rolls the spotlight share it replays a case the autonomous triage actually
+captured, which keeps the globe and the AML panel telling the same story. Each
+event is inserted into FINANCE and broadcast over Socket.IO as `live_txn`: the
+World panel pulses a marker at the transaction's merchant/branch, draws an arc
+from the account's home branch, and ticks a live counter — so the globe keeps
+moving even when the user isn't asking a question.
 
 Design notes
 ------------
@@ -25,17 +29,22 @@ Design notes
 
 from __future__ import annotations
 
+import math
 import random
+import time
 from datetime import datetime, timezone
 
 from flask import request as flask_request
 
+from agent.aml_capture import spotlight_profiles
 from config import (
     DEMO_USER,
     LIVE_FEED,
+    LIVE_FEED_BURST,
     LIVE_FEED_FLAG_RATE,
     LIVE_FEED_INTERVAL,
     LIVE_FEED_MAX,
+    LIVE_FEED_SPOTLIGHT,
     LIVE_FEED_TTL_MIN,
 )
 from db.connection import connect_demo
@@ -44,6 +53,13 @@ from db.connection import connect_demo
 # Reserved txn_id range for simulated rows (the seed tops out in the low
 # thousands), so purging can never touch curated data.
 LIVE_BASE = 9_000_000
+
+# Relative arrival rate per UTC hour (index = hour): quiet overnight, peaking
+# mid-morning to early afternoon. Weekends scale the whole curve down by 0.7.
+DIURNAL = [
+    0.25, 0.20, 0.20, 0.20, 0.25, 0.40, 0.70, 1.00, 1.30, 1.50, 1.60, 1.60,
+    1.50, 1.50, 1.45, 1.40, 1.30, 1.10, 0.90, 0.75, 0.60, 0.50, 0.40, 0.30,
+]
 
 # (reason, weight, merchant_located). The merchant-located rules plot at a
 # merchant (GEO_VELOCITY crosses borders); the cash rules carry no merchant and
@@ -66,6 +82,10 @@ _state: dict = {
     "dimensions": None,
     "emitted": 0,
     "seq": 0,
+    # Arrival cadence: bursts still to fire, and when the next event is due
+    # (monotonic clock) so status_payload can expose an ETA to the header.
+    "burst_left": 0,
+    "next_at": None,
 }
 
 
@@ -98,16 +118,16 @@ def _load_dimensions(conn) -> dict:
     merchants: list[dict] = []
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT a.account_id, b.branch_id, b.branch_code, b.name, b.city, "
+            f"SELECT a.account_id, a.customer_id, b.branch_id, b.branch_code, b.name, b.city, "
             f"       b.region, b.latitude, b.longitude "
             f"  FROM {DEMO_USER}.accounts a "
             f"  JOIN {DEMO_USER}.branches b ON b.branch_id = a.branch_id"
         )
-        for aid, bid, code, name, city, region, lat, lng in cur:
+        for aid, cid, bid, code, name, city, region, lat, lng in cur:
             if lat is None or lng is None:
                 continue
             accounts.append({
-                "account_id": int(aid), "branch_id": int(bid),
+                "account_id": int(aid), "customer_id": int(cid), "branch_id": int(bid),
                 "branch_code": code, "branch": name, "city": city,
                 "region": region, "lat": float(lat), "lng": float(lng),
             })
@@ -209,8 +229,33 @@ def _emit_one() -> dict | None:
 
     acct = random.choice(dims["accounts"])
     flagged = random.random() < LIVE_FEED_FLAG_RATE
+    amount = None  # the spotlight path sizes its own replay
 
-    if flagged:
+    # Spotlight: replay a case the autonomous triage actually captured, so the
+    # world feed and the AML panel tell the same story.
+    profile = None
+    if flagged and random.random() < LIVE_FEED_SPOTLIGHT:
+        profiles = spotlight_profiles()
+        profile = random.choice(profiles) if profiles else None
+        if profile is not None:
+            pool = [a for a in dims["accounts"] if a["customer_id"] == int(profile["customer_id"])]
+            if pool:
+                acct = random.choice(pool)
+            else:
+                profile = None  # no account loaded for that customer — generate one instead
+
+    if profile is not None:
+        reason = profile["typology"]
+        status = "BLOCKED" if random.random() < float(profile["blocked_share"]) else "FLAGGED"
+        # GEO_VELOCITY is the cross-border typology — send it abroad.
+        merchant = (
+            _pick_merchant(dims, acct["region"], cross_border=(reason == "GEO_VELOCITY"))
+            if profile["merchant_located"] else None
+        )
+        # Size the replay like the case's own average flagged txn, ±25%.
+        base = int(profile["exposure_cents"]) // max(1, int(profile["flagged_txns"]))
+        amount = max(900_00, int(base * random.uniform(0.75, 1.25)))
+    elif flagged:
         reason, merchant_located = _weighted_rule()
         status = "BLOCKED" if random.random() < 0.2 else "FLAGGED"
         # GEO_VELOCITY is the cross-border typology — send it abroad.
@@ -222,7 +267,8 @@ def _emit_one() -> dict | None:
         status, reason = "COMPLETED", None
         merchant = _pick_merchant(dims, acct["region"])
 
-    amount = _amount(status)
+    if amount is None:
+        amount = _amount(status)
     channel = random.choice(_CHANNELS)
     txn_type = random.choice(_TYPES)
 
@@ -275,6 +321,28 @@ def _emit_one() -> dict | None:
 
 
 # --------------------------------------------------------------------------- #
+# Arrival cadence
+# --------------------------------------------------------------------------- #
+
+def _next_gap_seconds(now_utc: datetime | None = None) -> float:
+    """Seconds until the next event — a diurnal Poisson arrival process.
+
+    `LIVE_FEED_INTERVAL` is the *peak-hour* mean gap; the DIURNAL table scales
+    it by the hour of day (weekends run ~30% lighter). Poisson spacing makes
+    quiet stretches and quick clusters both possible, and a burst in progress
+    wins outright — that is what a real bank feed looks like.
+    """
+    if _state["burst_left"] > 0:
+        _state["burst_left"] -= 1
+        return random.uniform(0.8, 2.4)
+
+    now = now_utc or datetime.now(timezone.utc)
+    mult = DIURNAL[now.hour] * (0.7 if now.weekday() >= 5 else 1.0)
+    gap = -math.log(1.0 - random.random()) * _state["interval"] / mult
+    return min(max(gap, 0.8), 150.0)
+
+
+# --------------------------------------------------------------------------- #
 # Loop + status + socket wiring
 # --------------------------------------------------------------------------- #
 
@@ -287,16 +355,29 @@ def _loop(socketio) -> None:
                 if payload:
                     _state["emitted"] += 1
                     socketio.emit("live_txn", payload)
+                    # Arrivals clump: a hit occasionally opens a short burst.
+                    if random.random() < LIVE_FEED_BURST:
+                        _state["burst_left"] = random.randint(3, 5)
         except Exception as e:
             print(f"[live_feed] tick failed: {type(e).__name__}: {e}")
             _reset_conn()
-        socketio.sleep(_state["interval"])
+        gap = _next_gap_seconds()
+        _state["next_at"] = time.monotonic() + gap
+        socketio.sleep(gap)
 
 
 def status_payload() -> dict:
+    next_at = _state["next_at"]
     return {
         "enabled": bool(_state["enabled"]),
         "interval": _state["interval"],
+        "mean_s": _state["interval"],
+        "spotlight_share": LIVE_FEED_SPOTLIGHT,
+        "burst_left": _state["burst_left"],
+        "next_in_ms": (
+            max(0, round((next_at - time.monotonic()) * 1000))
+            if _state["enabled"] and next_at else None
+        ),
         "emitted": _state["emitted"],
         "max": LIVE_FEED_MAX,
         "ttl_min": LIVE_FEED_TTL_MIN,
@@ -324,7 +405,8 @@ def init_live_feed(*, socketio) -> None:
 
     if _state["enabled"]:
         socketio.start_background_task(_loop, socketio)
-        print(f"  Live feed: ON (every {_state['interval']:g}s · max {LIVE_FEED_MAX} rows · "
+        print(f"  Live feed: ON (mean {_state['interval']:g}s at peak · diurnal · "
+              f"spotlight {LIVE_FEED_SPOTLIGHT:.0%} · max {LIVE_FEED_MAX} rows · "
               f"ttl {LIVE_FEED_TTL_MIN}m · flag rate {LIVE_FEED_FLAG_RATE:.0%})")
     else:
         print("  Live feed: OFF (set LIVE_FEED=true to enable).")

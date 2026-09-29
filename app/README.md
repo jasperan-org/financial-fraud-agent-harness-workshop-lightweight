@@ -124,19 +124,42 @@ You'll learn how to plumb an agent tool through to live front-end state via a pe
 
 ### 8. Live data feed — a production feel
 
-The app can also *simulate the bank operating*. `db/live_feed.py` runs a background greenlet that inserts one new transaction every few seconds — mostly ordinary card activity, ~35% fresh AML hits (STRUCTURING, GEO_VELOCITY, HIGH_RISK_COUNTRY, RAPID_CASH_OUT, LARGE_CASH_DEPOSIT) — and broadcasts each over Socket.IO as `live_txn`. The World panel:
+The app can also *simulate the bank operating*. `db/live_feed.py` runs a background greenlet that inserts new transactions on a **diurnal Poisson schedule** — `LIVE_FEED_INTERVAL` is the *peak-hour* mean gap (6 s), scaled down by hour-of-day (quiet overnight) and by a weekend factor, with occasional 3–5 event **bursts** (`LIVE_FEED_BURST`) — mostly ordinary card activity, ~35% fresh AML hits (STRUCTURING, GEO_VELOCITY, HIGH_RISK_COUNTRY, RAPID_CASH_OUT, LARGE_CASH_DEPOSIT) — and broadcasts each over Socket.IO as `live_txn`. A share `LIVE_FEED_SPOTLIGHT` (60%) of the flagged events instead **replays a case the autonomous triage captured**: the event lands on that customer's own account, carrying the case's typology, size and block outcome, so the globe and the AML panel tell the same story. The World panel:
 
 - **Pulses a marker** at the merchant (or the account's home branch for the cash rules) and draws a **home-branch → merchant arc** for each new hit.
+- **Flashes the arrival** — white-hot, thicker, faster for ~2.2 s with a ring ping at the destination — then cools into its AML colour while the halos already on the globe keep gliding; intensity thereafter tracks age (45 s half-life), and the oldest halo dissipates when an 11th arrives.
 - Runs a **radar sweep** and a **live ticker** naming the latest transaction.
 - Ticks a **live counter** (`+N live`) in the header and the toolbar.
 
-The globe stays legible under load: `/api/world` returns only the **most recent** `WORLD_ARC_LIMIT` arcs (default 30 of the ~160 in the 120-day window), and the live arcs are transient — only the freshest `LIVE_ARC_MAX` (8) are drawn, fading out after a 90-second window. So new AML hits appear as lines and then drop off instead of accumulating.
+The globe stays legible under load, and the live layer is built to be *watched* rather than rebuilt. Every live halo is **checkpointed by transaction id** (the `liveArcs` registry in `WorldExplorer.jsx`): the arc objects outlive a data update, and three-globe keys its layers by datum reference, so the same line — and the dash phase animating inside it — stays alive. A new hit therefore **never restarts the halos already gliding**, which is what used to happen when every update rebuilt the whole array. The newest `LIVE_ARC_MAX` (10) stay in flight, each one's **pulse intensity is its recency** (exponential decay, 45-second half-life, ~3-minute life), and the halo pushed out **dissipates** over ~1.8 s instead of being cut mid-glide. A brand-new hit is unmistakable: white-hot and thicker for its first 2.2 s, its comet running fast, with a birth ping ringing at its destination. The fetched arcs from `/api/world` (`WORLD_ARC_LIMIT`, default 30 of the ~160 in the 120-day window) get the same object-stability treatment — otherwise they would re-animate on every live event.
 
 The feed is bounded and self-cleaning: live rows use a reserved `txn_id` range (≥ 9,000,000), are capped (`LIVE_FEED_MAX`, default 300) and expire (`LIVE_FEED_TTL_MIN`, default 25 min), so the curated seed data is never touched. It respects identity on the client — a persona only plots events in its authorized regions, and masked amounts render as `[REDACTED]`. Toggle it live from the header **live / paused** pill, or disable it entirely with `LIVE_FEED=false`.
 
 Because the rows land in `FINANCE.TRANSACTIONS`, the agent sees them too — ask "how many flagged in the last 90 days?" twice and the number has moved. That is the point: an AI agent with real-time access to its data.
 
-### 9. Operational legibility (the right-side pane and bottom panels)
+### 9. The autonomous AML desk — a captured Grok run, replayed live
+
+The `Autonomous` tab turns the agent outward: instead of answering questions, it works the bank's AML alert queue. The queue *is* the data — every `(customer, typology)` group of `FLAGGED` / `BLOCKED` transactions in the last 30 days, the aggregation from notebook §12.3.
+
+The honest constraint: an autonomous loop that decides is a **metered** loop — the captured morning below cost 6 model round-trips and 29,309 tokens across three alerts. A workshop cannot spend that per attendee, so `agent/aml_capture.py` holds one **real Grok-4.3 run** (executed 2026-09-29) verbatim — its queries, rationales, confidences, next actions, even the §12.9 recap answer — and `agent/aml_replay.py` replays it. Nothing in the replay is invented.
+
+**Work the queue** starts a sweep (Socket.IO `aml_sweep_run`):
+
+| Step | What streams to the panel | Where it comes from |
+|---|---|---|
+| Evidence pack | `ALERT` / `RULE` / `QUEUE` / flagged txns / surrounding activity / accounts / 30-day flow / prior SARs | Assembled **live from `FINANCE`**, notebook §12.4's queries |
+| Tool call | `search_knowledge` with its arguments and the lines it returned | The captured call, at its captured latency |
+| Model call | `model call · xai.grok-4.3` | The captured latency (22–24 s; the whole sweep lands within a second of the recorded 89 s) |
+| Decision | `ESCALATE` / `KYC_REVIEW` / `DISMISS` + confidence + rationale + next action + SAR code | The captured reply, verbatim |
+| Record | an `AGENT.AML_REPLAY` row (run id, decision, mode, elapsed, tokens) | Written by the sweep |
+
+Alerts the capture has no decision for replay the same step shape and take the harness's own fallback — `REVIEW_REQUIRED`, confidence 0.0, "no validated model reply captured" — and the card reads `no capture → human review` rather than `captured`. Ordering prefers captured pairs so a demo sweep actually shows decisions (`AML_QUEUE_PREFER_CAPTURE=false` restores pure recency). The tab also offers **recall the morning**: the §12.9 call where the agent answers questions *about its own triage run* from memory — 16.2 s, no SQL.
+
+The boundary survives the replay: the sweep never writes to `FINANCE` and never touches `AGENT.AML_TRIAGE` — that table is the genuine capture, and both it and the replay ledger are browsable in the Data Explorer. Feeding the loop is `db/live_feed.py`'s **spotlight** (`LIVE_FEED_SPOTLIGHT`, 60%): flagged live events land on the captured cases' own accounts, carrying the case's typology, size and block outcome, so the globe, the queue and the triage story all point at the same customers. Set `LIVE_FEED_SPOTLIGHT=1` for an all-captured demo; `AML_REPLAY_SPEED` scales the replay (1 = the real timings, 0.05 = one sweep in seconds).
+
+One deliberate seam: the decision is a **record** while the evidence pack is assembled *now*, so the txns and totals can differ from the ones the recorded rationale cites (a live feed keeps adding activity). The decision card says so. That is what replaying a real run means.
+
+### 10. Operational legibility (the right-side pane and bottom panels)
 
 Every input the model received is visible:
 
@@ -158,7 +181,7 @@ The **World Explorer** renders the spatial layer of the same data (branches, mer
 
 You'll learn how to make an agent's reasoning auditable by showing exactly what entered its prompt, exactly what tools it dispatched, and exactly what data those tools returned — without baking that observability into the agent's own logic.
 
-### 10. Provider routing and graceful degradation
+### 11. Provider routing and graceful degradation
 
 `agent/llm.py` is an `LlmRouter` that:
 
@@ -169,24 +192,25 @@ You'll learn how to make an agent's reasoning auditable by showing exactly what 
 
 You'll learn how to ship an agent that doesn't go dark when a provider has a bad day, and how to make `.env` parse-resilient so a typo doesn't take down the harness.
 
-### 10. The "boring on purpose" closing note
+### 12. The "boring on purpose" closing note
 
-The whole thing is ~1500 lines of Python and ~2500 lines of React. There is no LangChain, no AutoGen, no LlamaIndex — just `python-oracledb`, `oracleagentmemory`, `openai`, and the OpenAI-compatible OCI endpoint. The point of the app is to show how much of an enterprise agent's hard problems (memory, identity, observability, sandboxing, durable state, semantic retrieval over your own data) are already solvable with primitives Oracle AI Database 26ai ships out of the box. Read the harness end-to-end. You should know exactly where every decision is made and every side effect lands.
+The whole thing is ~1500 lines of Python and ~2500 lines of React. The app itself uses no agent framework — no LangChain, no AutoGen, no LlamaIndex — just `python-oracledb`, `oracleagentmemory`, `openai`, and the OpenAI-compatible OCI endpoint. (The notebook shows the LangChain *interop* in §3.6 — `OracleEmbeddings` + `OracleVS` over the same store — because plenty of teams arrive with a LangChain app; the harness in this folder deliberately does not need it.) The point of the app is to show how much of an enterprise agent's hard problems (memory, identity, observability, sandboxing, durable state, semantic retrieval over your own data) are already solvable with primitives Oracle AI Database 26ai ships out of the box. Read the harness end-to-end. You should know exactly where every decision is made and every side effect lands.
 
 ```
 Browser (React SPA)
   ├─ Header                  -- thread id, connection status, "new thread"
   ├─ ThreadList (left)       -- OAMP threads, click to switch
   ├─ ChatPane (center)       -- message bubbles + streaming tool-call trace
-  └─ MemoryContext (right)   -- live snapshot of what's in the agent's context
-                                (recent messages · top memories · tool outputs ·
-                                 skill manifest · tool manifest)
+  └─ InstrumentPanel (right) -- World (globe + live feed) · Context · Data ·
+                                Autonomous (the captured AML triage replay)
 
 WebSocket + REST (Socket.IO)
   ├─ send_message            -- runs one turn of the agent loop, streams tool events
   ├─ new_thread              -- mints a thread id
   ├─ request_context_window  -- on-demand context refresh
-  └─ /api/threads, /api/context/<thread_id>, /api/health
+  ├─ live_txn / live_feed_*  -- the simulated bank feed (diurnal Poisson arrivals)
+  ├─ aml_sweep_run / aml_*   -- the autonomous AML sweep (queue, steps, decisions)
+  └─ /api/threads, /api/context/<thread_id>, /api/world, /api/health
 
 Flask API (Python / eventlet)
   ├─ agent/harness.py        -- the §11 loop, with skill manifest prepended (§11.5)
@@ -194,8 +218,11 @@ Flask API (Python / eventlet)
   │                             scan_database · load_skill · list_skills
   ├─ agent/skills.py         -- skillbox (Oracle skills repo ingestion)
   ├─ agent/mle.py            -- exec_js via DBMS_MLE
+  ├─ agent/aml_capture.py    -- the captured Grok triage run (pure data)
+  ├─ agent/aml_replay.py     -- replays it over the live alert queue; AGENT.AML_REPLAY
   ├─ memory/manager.py       -- OAMP client + in-DB ONNX embedder
   ├─ retrieval/scanner.py    -- §5 scanner condensed
+  ├─ db/live_feed.py         -- the simulated bank: diurnal Poisson inserts + spotlight
   └─ api/{routes, events, context}.py
 
 python-oracledb (thin)
@@ -275,7 +302,7 @@ python scripts/setup_deep_security.py --demo      # + same-SQL/different-persona
 python scripts/setup_deep_security.py --ddl-only  # write the Deep Sec DDL, touch nothing
 ```
 
-Probes the instance, seeds the persona rule tables, and installs the 15 `DBMS_RLS` policies on `FINANCE` — or writes the equivalent `CREATE DATA ROLE` / `CREATE END USER` / `CREATE DATA GRANT` DDL when Deep Data Security is available. Safe to re-run: it clears the policies it owns before reinstalling, so this script and the notebook's Part 8 supersede each other cleanly. Deep dive: [`docs/part-8-deep-data-security.md`](../docs/part-8-deep-data-security.md).
+Probes the instance, seeds the persona rule tables, and installs the 15 `DBMS_RLS` policies on `FINANCE` — or writes the equivalent `CREATE DATA ROLE` / `CREATE END USER` / `CREATE DATA GRANT` DDL when Deep Data Security is available. Safe to re-run: it clears the policies it owns before reinstalling, so this script and the notebook's §6.7 (which only *reads* under an identity) never fight over state. Deep dive: [`docs/part-8-deep-data-security.md`](../docs/part-8-deep-data-security.md).
 
 ## Run
 

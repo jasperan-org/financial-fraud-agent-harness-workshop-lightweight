@@ -45,6 +45,11 @@ TABLE_ALLOWLIST: dict[str, list[str]] = {
     AGENT_USER.upper(): [
         "TOOLBOX", "SKILLBOX", "SCHEMA_ACL", "AGENT_AUTHORIZATIONS",
         "AGENT_CLEARANCES", "SCAN_HISTORY",
+        # The AML desk's bookkeeping: the triage ledger the autonomous run
+        # wrote (AML_TRIAGE) and the replay ledger this app writes when a
+        # sweep re-decides an alert (AML_REPLAY) — both are what an examiner
+        # would query, so they belong in the explorer.
+        "AML_TRIAGE", "AML_REPLAY",
     ],
 }
 

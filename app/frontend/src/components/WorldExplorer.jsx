@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Globe from "react-globe.gl";
 import { Globe2, Search, Building2, Store, AlertTriangle, RefreshCw, Crosshair } from "lucide-react";
 
@@ -20,11 +20,21 @@ const FLAG_ARC_COLOR = {
   LARGE_CASH_DEPOSIT: "#f80000",
 };
 
-// Live-feed arcs are transient: only the freshest few are drawn, and any older
-// than this window drop off, so new AML hits appear as lines and then fade
-// instead of piling up on the globe forever.
-const LIVE_ARC_WINDOW_MS = 90_000;
-const LIVE_ARC_MAX = 8;
+// Live-feed arcs are meant to be watched, not rebuilt: the newest LIVE_ARC_MAX
+// stay on the globe, each halo keeps its own phase in the dash animation, the
+// pulse intensity decays with age (recency), and the arc that gets pushed out
+// dissipates instead of being cut mid-flight.
+// three-globe keys its layers by datum *reference*, so an arc object that
+// survives a data update also survives with its animation intact — see the
+// registries in WorldExplorer.
+const LIVE_ARC_MAX = 10;
+const LIVE_ARC_TTL_MS = 180_000;    // 3 min — by then the pulse is ~6% of birth intensity
+const LIVE_ARC_FADE_MS = 1_800;     // the silent dissipation of an arc leaving the window
+const LIVE_FRESH_MS = 2_200;        // birth flash: white-hot, thicker, faster comet
+const PULSE_HALF_LIFE_MS = 45_000;  // recency → intensity: alpha halves every 45 s
+const LIVE_TICK_MS = 250;           // heartbeat that drives the flash/fade
+const BASE_ARC_STROKE = 0.4;
+const BASE_ARC_DASH_MS = 3_500;
 
 const KIND_ICON = {
   branch:   Building2,
@@ -131,13 +141,13 @@ export default function WorldExplorer({
     return masks.some((m) => String(m).toUpperCase().endsWith("AMOUNT_CENTS"));
   }, [identity]);
 
-  // Tick so the recency window below re-evaluates as events age — otherwise a
-  // live arc would only disappear when the next event happened to arrive.
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNowTick(Date.now()), 4000);
-    return () => window.clearInterval(id);
-  }, []);
+  // Heartbeat for the live layer. `nowRef` is what the pulse/birth accessors
+  // read, so the animation advances without React having to re-render — only a
+  // membership change (or an arc in flight, which forces the globe's arc layer
+  // to re-evaluate its colors) bumps state.
+  const nowRef = useRef(Date.now());
+  const [liveVersion, setLiveVersion] = useState(0); // arrivals, dissipations, flips
+  const [arcTick, setArcTick] = useState(0);          // 250 ms while arcs are in flight
 
   // Region-gated (for the ticker + counters) — no time window.
   const liveAllowed = useMemo(() => {
@@ -145,66 +155,159 @@ export default function WorldExplorer({
     return (live?.events || []).filter((e) => !regs || regs.includes(e.region));
   }, [live?.events, identity]);
 
-  // Recent only — drives the transient arcs, points and rings so the globe
-  // never accumulates lines. Stabilised by id set: the 4s tick must not hand a
-  // fresh array to the globe when the membership hasn't actually changed (that
-  // would restart the arc dash animation for no reason).
-  const liveRecent = useMemo(
-    () => liveAllowed.filter((e) => nowTick - (e.receivedAt || nowTick) < LIVE_ARC_WINDOW_MS),
-    [liveAllowed, nowTick],
-  );
-
+  // Newest-first flagged/blocked events, stabilised by id set: any re-render
+  // that doesn't change membership must hand the globe the *same* array, or
+  // the layer treats every entry as new and restarts the dash animation.
   const liveFlaggedRef = useRef({ key: "", arr: [] });
   const liveFlagged = useMemo(() => {
-    const next = liveRecent.filter((e) => e.status === "FLAGGED" || e.status === "BLOCKED");
+    const next = liveAllowed.filter((e) => e.status === "FLAGGED" || e.status === "BLOCKED");
     const key = next.map((e) => e.txn_id).join(",");
     if (key === liveFlaggedRef.current.key) return liveFlaggedRef.current.arr;
     liveFlaggedRef.current = { key, arr: next };
     return next;
-  }, [liveRecent]);
+  }, [liveAllowed]);
 
-  const livePoints = useMemo(
-    () => liveFlagged.slice(0, 60).map((e) => ({
-      kind: "suspicious_activity",
-      id: `live-${e.txn_id}`,
-      txn_id: e.txn_id,
-      txn_ts: e.txn_ts,
-      amount_cents: e.amount_cents,
-      status: e.status,
-      flag_reason: e.flag_reason,
-      channel: e.channel,
-      region: e.region,
-      merchant: e.merchant,
-      merchant_category: e.merchant_category,
-      lat: e.lat,
-      lng: e.lng,
-      live: true,
-    })),
-    [liveFlagged],
-  );
+  // One stable object per live transaction, keyed by txn_id. The globe updates
+  // its arc/point layers with a data join keyed by the datum *reference*, so an
+  // object that survives an update keeps its three.js arc — and the dash phase
+  // animating inside it — alive. Building new objects on every tick (what the
+  // old `.map()` did) destroyed and rebuilt every halo at once, which is why a
+  // single arriving transaction used to reset the whole constellation.
+  const liveArcsRef = useRef(new Map());
+  const livePointsRef = useRef(new Map());
+  const liveRingsRef = useRef(new Map());
+  // Transactions whose halo already dissipated: the feed keeps their event in
+  // the buffer, and without this they would be re-created (and flash again) the
+  // moment the registry dropped them.
+  const retiredRef = useRef(new Set());
+  const flaggedRef = useRef(liveFlagged);
+  flaggedRef.current = liveFlagged;
 
-  const liveArcs = useMemo(
-    () => liveFlagged
-      .filter((e) => e.origin && e.lat != null)
-      .slice(0, LIVE_ARC_MAX)
-      .map((e) => ({
-        kind: "activity_arc",
-        id: `live-${e.txn_id}`,
-        status: e.status,
-        flag_reason: e.flag_reason,
-        region: e.region,
-        branch: e.origin.branch,
-        branch_code: e.origin.branch_code,
-        merchant: e.merchant,
-        startLat: e.origin.lat,
-        startLng: e.origin.lng,
-        endLat: e.lat,
-        endLng: e.lng,
-        color: FLAG_ARC_COLOR[e.flag_reason] || "#ffffff",
-        live: true,
-      })),
-    [liveFlagged],
-  );
+  const syncLive = useCallback(() => {
+    const now = nowRef.current;
+    let changed = false;
+
+    // Rank is recency: index 0 is the arrival, index 10 is the one that must go.
+    const candidates = flaggedRef.current.filter((e) => e.origin && e.lat != null);
+    const alive = new Set();
+    candidates.forEach((e, rank) => {
+      alive.add(e.txn_id);
+      let arc = liveArcsRef.current.get(e.txn_id);
+      if (!arc && !retiredRef.current.has(e.txn_id)) {
+        const bornAt = e.receivedAt || now;
+        arc = {
+          kind: "activity_arc",
+          id: `live-${e.txn_id}`,
+          live: true,
+          txn_id: e.txn_id,
+          status: e.status,
+          flag_reason: e.flag_reason,
+          region: e.region,
+          branch: e.origin.branch,
+          branch_code: e.origin.branch_code,
+          merchant: e.merchant,
+          startLat: e.origin.lat,
+          startLng: e.origin.lng,
+          endLat: e.lat,
+          endLng: e.lng,
+          color: FLAG_ARC_COLOR[e.flag_reason] || "#ffffff",
+          bornAt,
+          fadeAt: null,
+        };
+        liveArcsRef.current.set(e.txn_id, arc);
+        livePointsRef.current.set(e.txn_id, {
+          kind: "suspicious_activity",
+          id: `live-${e.txn_id}`,
+          live: true,
+          txn_id: e.txn_id,
+          txn_ts: e.txn_ts,
+          amount_cents: e.amount_cents,
+          status: e.status,
+          flag_reason: e.flag_reason,
+          channel: e.channel,
+          region: e.region,
+          merchant: e.merchant,
+          merchant_category: e.merchant_category,
+          lat: e.lat,
+          lng: e.lng,
+          color: FLAG_ARC_COLOR[e.flag_reason] || "#f80000",
+          bornAt,
+          fadeAt: null,
+        });
+        // Birth ping: the one cue that reads as "this just landed", gone after
+        // the flash so it never competes with the steady halos.
+        liveRingsRef.current.set(e.txn_id, {
+          live: true,
+          lat: e.lat,
+          lng: e.lng,
+          color: FLAG_ARC_COLOR[e.flag_reason] || "#f80000",
+          bornAt,
+        });
+        changed = true;
+      }
+      // Pushed past the cap, or aged out of the window: start the fade once —
+      // the arc keeps gliding while it dissipates instead of being cut.
+      // (`arc` is null for a transaction whose halo already dissipated: the
+      // feed still buffers its event, and nothing about it is drawn again.)
+      if (arc && !arc.fadeAt && (rank >= LIVE_ARC_MAX || now - arc.bornAt > LIVE_ARC_TTL_MS)) {
+        arc.fadeAt = now;
+        const point = livePointsRef.current.get(e.txn_id);
+        if (point) point.fadeAt = now;
+        changed = true;
+      }
+    });
+
+    for (const [txnId, arc] of liveArcsRef.current) {
+      if (!alive.has(txnId) && !arc.fadeAt) {
+        arc.fadeAt = now;
+        const point = livePointsRef.current.get(txnId);
+        if (point) point.fadeAt = now;
+        changed = true;
+      }
+      if (arc.fadeAt && now - arc.fadeAt > LIVE_ARC_FADE_MS) {
+        liveArcsRef.current.delete(txnId);
+        livePointsRef.current.delete(txnId);
+        retiredRef.current.add(txnId);
+        changed = true;
+      }
+    }
+    // Once an event has aged out of the feed buffer there is nothing left to
+    // guard against, so the retired set stays bounded by the buffer size.
+    for (const txnId of retiredRef.current) {
+      if (!alive.has(txnId)) retiredRef.current.delete(txnId);
+    }
+
+    for (const [txnId, ring] of liveRingsRef.current) {
+      if (now - ring.bornAt > LIVE_FRESH_MS + 700) {
+        liveRingsRef.current.delete(txnId);
+        changed = true;
+      }
+    }
+    return changed;
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      nowRef.current = Date.now();
+      if (syncLive()) setLiveVersion((v) => v + 1);
+      if (liveArcsRef.current.size) setArcTick((t) => t + 1);
+    }, LIVE_TICK_MS);
+    return () => window.clearInterval(id);
+  }, [syncLive]);
+
+  // A feed event can land between ticks — pull it in immediately so the birth
+  // flash starts on arrival rather than up to 250 ms later.
+  useEffect(() => {
+    nowRef.current = Date.now();
+    if (syncLive()) setLiveVersion((v) => v + 1);
+  }, [liveFlagged, syncLive]);
+
+  // Arrays are rebuilt per tick on purpose (that is what makes the globe
+  // re-read the arc accessors); the *objects* inside them never change
+  // identity, which is what keeps the halos in flight.
+  const liveArcs = useMemo(() => [...liveArcsRef.current.values()], [arcTick, liveVersion]);
+  const livePoints = useMemo(() => [...livePointsRef.current.values()], [liveVersion]);
+  const liveRings = useMemo(() => [...liveRingsRef.current.values()], [liveVersion, arcTick]);
 
   const fetchWorld = () => {
     setLoading(true);
@@ -271,6 +374,9 @@ export default function WorldExplorer({
   useEffect(() => {
     if (!wrapRef.current) return;
     const ro = new ResizeObserver(() => {
+      // The observer can fire once more after the panel unmounts (tab switch),
+      // when the wrapper ref is already gone.
+      if (!wrapRef.current) return;
       const rect = wrapRef.current.getBoundingClientRect();
       setGlobeSize({
         w: Math.max(240, Math.round(rect.width)),
@@ -281,46 +387,50 @@ export default function WorldExplorer({
     return () => ro.disconnect();
   }, []);
 
-  const points = useMemo(() => {
+  // Base markers are built once per dataset/layer change; their live values
+  // (size, colour) come from accessors so re-renders never re-create them —
+  // a re-created marker is a destroyed and re-animated cylinder.
+  const basePoints = useMemo(() => {
     const out = [];
-    // The layer the agent is currently reading breathes (1.35× → 1.9×) so the
-    // map visibly responds to the tool call even without a camera move.
-    const grow = (layer) =>
-      pulseLayers.has(layer) ? (pulseOn ? 1.9 : 1.35) : 1;
     if (layers.branches) {
       for (const b of data.branches) {
-        out.push({ ...b, _layer: "branches", size: 0.18 * grow("branches"), color: LAYER_COLORS.branch });
+        out.push({ ...b, _layer: "branches", size: 0.18, color: LAYER_COLORS.branch });
       }
     }
     if (layers.merchants) {
       for (const m of data.merchants) {
-        out.push({ ...m, _layer: "merchants", size: 0.12 * grow("merchants"), color: LAYER_COLORS.merchant });
+        out.push({ ...m, _layer: "merchants", size: 0.12, color: LAYER_COLORS.merchant });
       }
     }
     if (layers.suspicious_activity) {
       for (const s of data.suspicious_activity || []) {
-        out.push({ ...s, _layer: "suspicious_activity", size: 0.3 * grow("suspicious_activity"), color: LAYER_COLORS.suspicious_activity });
-      }
-      // Live AML hits stream in — slightly larger so fresh ones stand out.
-      for (const s of livePoints) {
-        out.push({ ...s, _layer: "suspicious_activity", size: 0.45 * grow("suspicious_activity"), color: LAYER_COLORS.suspicious_activity });
+        out.push({ ...s, _layer: "suspicious_activity", size: 0.3, color: LAYER_COLORS.suspicious_activity });
       }
     }
     if (searchResult) {
       out.push({
         ...searchResult,
         kind: searchResult.kind,
-        size: 0.9,
         color: LAYER_COLORS[searchResult.kind] || "#ffffff",
         searchAnchor: true,
       });
     }
     return out;
-  }, [data, layers, searchResult, pulseLayers, pulseOn, livePoints]);
+  }, [data, layers, searchResult]);
 
-  const arcs = useMemo(() => {
-    if (!layers.suspicious_activity) return [];
-    const base = (data.activity_arcs || [])
+  // pulseLayers/pulseOn are dependencies on purpose: the accessors read them
+  // through a ref, so the *array* has to change identity for the globe to
+  // re-evaluate the markers while the agent's layer pulse breathes.
+  const points = useMemo(
+    () => [...basePoints, ...livePoints],
+    [basePoints, livePoints, pulseKey, pulseOn],
+  );
+
+  // Base arcs keep their identity across live updates too — otherwise every
+  // arriving transaction would rebuild the fetched arcs along with the live
+  // ones (and restart their halos).
+  const baseArcs = useMemo(
+    () => (data.activity_arcs || [])
       .filter((a) => a.origin && a.destination)
       .map((a) => ({
         startLat: a.origin.lat,
@@ -328,29 +438,31 @@ export default function WorldExplorer({
         endLat: a.destination.lat,
         endLng: a.destination.lng,
         color: FLAG_ARC_COLOR[a.flag_reason] || "#ffffff",
+        live: false,
         ...a,
-      }));
-    return [...base, ...liveArcs];
-  }, [data.activity_arcs, layers.suspicious_activity, liveArcs]);
+      })),
+    [data.activity_arcs],
+  );
 
-  // Ripples: the anchor the agent flew to, plus the freshest live AML hits —
-  // so new detections visibly pulse on the globe as they arrive.
-  const rings = useMemo(() => {
-    const out = [];
-    if (searchResult && searchResult.lat != null && searchResult.lng != null) {
-      out.push({
-        lat: searchResult.lat,
-        lng: searchResult.lng,
-        color: LAYER_COLORS[searchResult.kind] || "#ffd166",
-      });
-    }
-    for (const e of liveFlagged.slice(0, 3)) {
-      if (e.lat != null && e.lng != null) {
-        out.push({ lat: e.lat, lng: e.lng, color: FLAG_ARC_COLOR[e.flag_reason] || "#f80000" });
-      }
-    }
-    return out;
-  }, [searchResult, liveFlagged]);
+  const arcs = useMemo(() => {
+    if (!layers.suspicious_activity) return [];
+    return [...baseArcs, ...liveArcs];
+  }, [baseArcs, layers.suspicious_activity, liveArcs]);
+
+  // Ripples: the anchor the agent flew to (steady ping) plus the birth ping of
+  // the freshest live AML hits — so a detection pulses once as it arrives and
+  // then settles into the arc.
+  const searchRing = useMemo(
+    () => (searchResult && searchResult.lat != null && searchResult.lng != null
+      ? { lat: searchResult.lat, lng: searchResult.lng, color: LAYER_COLORS[searchResult.kind] || "#ffd166", anchor: true, bornAt: 0 }
+      : null),
+    [searchResult],
+  );
+
+  const rings = useMemo(
+    () => (searchRing ? [searchRing, ...liveRings] : liveRings),
+    [searchRing, liveRings],
+  );
 
   const onSearch = (e) => {
     e.preventDefault();
@@ -390,6 +502,91 @@ export default function WorldExplorer({
         setSearchResult(null);
       });
   };
+
+  // ---- Globe accessors -----------------------------------------------------
+  // Stable callbacks on purpose: react-kapsule re-applies a prop only when its
+  // identity changes, so a heartbeat re-render can never re-enter the point
+  // layer (hundreds of markers) — the live arc layer gets a fresh data array
+  // instead (see `arcs`), which is all the pulse needs to re-read `nowRef`.
+  const pulseRef = useRef({ layers: pulseLayers, on: pulseOn });
+  pulseRef.current = { layers: pulseLayers, on: pulseOn };
+
+  const pointAltitudeOf = useCallback(
+    (d) => (d.searchAnchor ? 0.06 : d.kind === "suspicious_activity" ? 0.012 : 0.008),
+    [],
+  );
+
+  const pointRadiusOf = useCallback((d) => {
+    if (d.searchAnchor) return 0.9;
+    if (d.live) return _livePointRadius(d, nowRef.current);
+    const pulse = pulseRef.current;
+    const grow = pulse.layers.has(d._layer) ? (pulse.on ? 1.9 : 1.35) : 1;
+    return d.size * grow;
+  }, []);
+
+  const pointColorOf = useCallback((d) => {
+    if (!d.live) return d.color;
+    const now = nowRef.current;
+    const age = Math.max(0, now - d.bornAt);
+    if (age < LIVE_FRESH_MS) return _rgbaMix("#ffffff", d.color, age / LIVE_FRESH_MS, 1);
+    return _rgba(d.color, _liveAlpha(d, now, 0.18));
+  }, []);
+
+  const pointLabelOf = useCallback((d) => buildLabel(d), []);
+
+  const onPointClick = useCallback((d) => {
+    if (globeRef.current) {
+      globeRef.current.pointOfView({ lat: d.lat, lng: d.lng, altitude: 1.4 }, 1000);
+    }
+  }, []);
+
+  // Arc colours carry the recency signal: the arrival is white-hot for a couple
+  // of seconds, then cools into its AML colour and decays on a 45 s half-life.
+  const arcColorOf = useCallback((d) => {
+    if (!d.live) return d.color;
+    const now = nowRef.current;
+    const age = Math.max(0, now - d.bornAt);
+    if (age < LIVE_FRESH_MS) return _rgbaMix("#ffffff", d.color, age / LIVE_FRESH_MS, 1);
+    return _rgba(d.color, _liveAlpha(d, now, 0.1));
+  }, []);
+
+  const arcStrokeOf = useCallback((d) => {
+    if (!d.live) return BASE_ARC_STROKE;
+    const now = nowRef.current;
+    const age = Math.max(0, now - d.bornAt);
+    if (age < LIVE_FRESH_MS) return 0.85 - 0.45 * (age / LIVE_FRESH_MS);
+    if (!d.fadeAt) return BASE_ARC_STROKE;
+    return Math.max(0.02, BASE_ARC_STROKE * (1 - (now - d.fadeAt) / LIVE_ARC_FADE_MS));
+  }, []);
+
+  // The arrival comet runs hot (fast dash) and settles into the steady glide.
+  const arcDashAnimateOf = useCallback(
+    (d) => (d.live && nowRef.current - d.bornAt < LIVE_FRESH_MS ? 1_200 : BASE_ARC_DASH_MS),
+    [],
+  );
+
+  const arcDashLengthOf = useCallback(
+    (d) => (d.live && nowRef.current - d.bornAt < LIVE_FRESH_MS ? 0.6 : 0.45),
+    [],
+  );
+
+  const arcLabelOf = useCallback((d) =>
+    `<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#f5f5f5;background:#0a0a0acc;padding:6px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:4px">
+               <strong>txn ${d.id}</strong> · ${d.status}<br/>
+               ${d.branch} → ${d.merchant}<br/>
+               <span style="color:#888">${d.flag_reason || "AML"} · ${d.region}</span>
+             </div>`, []);
+
+  // Birth ping: white, fast, gone in ~3 s; the search anchor keeps its steady
+  // ripple.
+  const ringColorOf = useCallback((d) => {
+    if (!d.live) return d.color;
+    const t = Math.min(1, Math.max(0, nowRef.current - d.bornAt) / (LIVE_FRESH_MS + 700));
+    return _rgbaMix("#ffffff", d.color, t, 1 - 0.8 * t);
+  }, []);
+  const ringMaxRadiusOf = useCallback((d) => (d.anchor ? 4 : 3.2), []);
+  const ringSpeedOf = useCallback((d) => (d.anchor ? 2.2 : 3.6), []);
+  const ringRepeatOf = useCallback((d) => (d.anchor ? 800 : 520), []);
 
   const noFeatures = !loading && !error && data.stats.branches === 0;
 
@@ -609,43 +806,31 @@ export default function WorldExplorer({
           pointsData={points}
           pointLat="lat"
           pointLng="lng"
-          pointColor="color"
-          pointAltitude={(d) =>
-            d.searchAnchor ? 0.06 : d.kind === "suspicious_activity" ? 0.012 : 0.008
-          }
-          pointRadius={(d) => d.size}
-          pointLabel={(d) => buildLabel(d)}
-          onPointClick={(d) => {
-            if (globeRef.current) {
-              globeRef.current.pointOfView({ lat: d.lat, lng: d.lng, altitude: 1.4 }, 1000);
-            }
-          }}
+          pointColor={pointColorOf}
+          pointAltitude={pointAltitudeOf}
+          pointRadius={pointRadiusOf}
+          pointLabel={pointLabelOf}
+          onPointClick={onPointClick}
           ringsData={rings}
           ringLat="lat"
           ringLng="lng"
-          ringColor={(d) => d.color}
-          ringMaxRadius={4}
-          ringPropagationSpeed={2.2}
-          ringRepeatPeriod={800}
+          ringColor={ringColorOf}
+          ringMaxRadius={ringMaxRadiusOf}
+          ringPropagationSpeed={ringSpeedOf}
+          ringRepeatPeriod={ringRepeatOf}
           ringAltitude={0.006}
           arcsData={arcs}
           arcStartLat="startLat"
           arcStartLng="startLng"
           arcEndLat="endLat"
           arcEndLng="endLng"
-          arcColor={(d) => d.color}
+          arcColor={arcColorOf}
           arcAltitudeAutoScale={0.4}
-          arcStroke={0.4}
-          arcDashLength={0.45}
+          arcStroke={arcStrokeOf}
+          arcDashLength={arcDashLengthOf}
           arcDashGap={0.15}
-          arcDashAnimateTime={3500}
-          arcLabel={(d) =>
-            `<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#f5f5f5;background:#0a0a0acc;padding:6px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:4px">
-               <strong>txn ${d.id}</strong> · ${d.status}<br/>
-               ${d.branch} → ${d.merchant}<br/>
-               <span style="color:#888">${d.flag_reason || "AML"} · ${d.region}</span>
-             </div>`
-          }
+          arcDashAnimateTime={arcDashAnimateOf}
+          arcLabel={arcLabelOf}
         />
         {/* Radar sweep — runs while the agent works so the globe reads as
             live even when the query has no single location to fly to. */}
@@ -704,6 +889,48 @@ const _usd = (cents) => {
   return "$" + (Number(cents) / 100).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   });
+};
+
+// three-globe parses per-vertex `rgba(r, g, b, a)` colours, so the live layer's
+// recency intensity rides on the alpha channel and never has to touch materials
+// or geometry.
+const _hexToRgb = (hex) => {
+  const h = String(hex || "#ffffff").replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+  return Number.isFinite(n) ? [(n >> 16) & 255, (n >> 8) & 255, n & 255] : [255, 255, 255];
+};
+const _clamp01 = (v) => Math.max(0, Math.min(1, v));
+// Alpha is quantised to 1%: the points layer caches one material per colour
+// string, so continuous alphas would grow that cache without bound.
+const _q = (a) => Math.round(_clamp01(a) * 100) / 100;
+const _rgba = (hex, alpha) => {
+  const [r, g, b] = _hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${_q(alpha).toFixed(2)})`;
+};
+const _rgbaMix = (fromHex, toHex, t, alpha) => {
+  const a = _hexToRgb(fromHex);
+  const b = _hexToRgb(toHex);
+  const k = _clamp01(t);
+  const c = [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * k));
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${_q(alpha).toFixed(2)})`;
+};
+
+// Live markers are slightly larger at birth and shrink back to the steady size.
+const _livePointRadius = (d, now) => {
+  const age = Math.max(0, now - d.bornAt);
+  const base = age < LIVE_FRESH_MS ? 0.62 - 0.17 * (age / LIVE_FRESH_MS) : 0.45;
+  return d.fadeAt ? Math.max(0.02, base * (1 - (now - d.fadeAt) / LIVE_ARC_FADE_MS)) : base;
+};
+
+// Recency → intensity, shared by arcs and markers: exponential decay with a
+// 45 s half-life. The floor keeps an aged detection faintly visible; a fading
+// entry then multiplies down to zero, which is what makes it dissipate instead
+// of blinking out.
+const _liveAlpha = (d, now, floor) => {
+  const age = Math.max(0, now - d.bornAt);
+  const recency = Math.max(floor, 0.5 ** (age / PULSE_HALF_LIFE_MS));
+  if (!d.fadeAt) return recency;
+  return recency * Math.max(0, 1 - (now - d.fadeAt) / LIVE_ARC_FADE_MS);
 };
 
 function buildLabel(d) {

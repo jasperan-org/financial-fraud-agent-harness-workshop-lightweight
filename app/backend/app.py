@@ -100,6 +100,9 @@ def init_app():
     from db.live_feed import init_live_feed
     init_live_feed(socketio=socketio)
 
+    from agent.aml_replay import init_aml_replay
+    init_aml_replay(socketio=socketio, agent_conn=agent_conn)
+
     print("\n=== Backend ready! ===\n")
 
 

@@ -24,6 +24,8 @@
 - Answers: [`notebook_complete.ipynb`](notebook_complete.ipynb) — the same notebook, solved, with its outputs saved so you can read it without running anything
 - Part-by-part guides: [`docs/`](docs/) · [TODO checklist](docs/TODO-checklist.md) · [troubleshooting](docs/troubleshooting.md)
 
+Beyond the TODOs, the notebook has six short “the rest of the platform” sections — read them or run them, they add no exercises: **§2.6** OAMP's memory types, relations, one-hop traversal and retention · **§3.6** the same embeddings and three retrieval legs through `langchain-oracledb` (`OracleEmbeddings`, `OracleVS`, `OracleTextSearchRetriever`) · **§6.6** Oracle MLE, Oracle Spatial and duality views as three more tools · **§6.7** identity — one query, five end users, the kernel deciding · **§7.4** tool-output offload with TTL on the offloaded rows.
+
 **The demo bank.** Meridian Bank: 60 branches and 140 merchants (Oracle Spatial) across four regions, 2,000 customers, 2,650 accounts, ~23,600 transactions over 90 days, 900 loans, 117 SAR reports, plus the AML desk's paperwork — sanctions screenings, beneficial owners, wire messages, login events, KYC documents, case notes. A slice of the transactions is deliberately suspicious, and `transactions.flag_reason` records which rule fired: `STRUCTURING`, `GEO_VELOCITY`, `HIGH_RISK_COUNTRY`, `RAPID_CASH_OUT`, `LARGE_CASH_DEPOSIT`. That column is the fraud use case — it turns "query the bank" into a money-laundering investigation ([one-pager](docs/fraud-detection-onepager.md)).
 
 ![Toolbox flow — register-time vs per-turn retrieval](images/cover-toolbox-flow.png)
@@ -44,7 +46,7 @@ The Codespace starts the **Meridian Bank AML app** (Flask + Socket.IO + React) a
 ![World Explorer with flagged-activity arcs](app/images/meridian-world-explorer.png)
 *World Explorer: branches, merchants, and the suspicious-activity layer — flagged and blocked transactions plotted at their merchant with arcs coloured by AML flag reason, plus a live feed of new transactions.*
 
-What the app adds beyond the notebook: a live memory pane (top memories, tool outputs, skill manifest, token usage) on every turn, MLE compute, the DBFS scratchpad, duality views, spatial search, scheduled rescans, and a triage ledger the notebook's Part 12 writes and the app can read back.
+What the app adds beyond the notebook: a live memory pane (top memories, tool outputs, skill manifest, token usage) on every turn, the World Explorer globe the agent can fly, per-request identity switching, DBFS scratch tools wired into the loop, the tool-output offload and `fetch_tool_output` recovery path, scheduled rescans, and a triage ledger the notebook's Part 12 writes and the app can read back. (The notebook shows the same platform primitives — MLE, spatial, duality views, identity, offload — in §6.6, §6.7 and §7.4; the app shows them under a UI.)
 
 | Try this in the app | What it exercises |
 |---|---|
@@ -59,6 +61,8 @@ Full documentation: [`app/README.md`](app/README.md).
 ## The capstone — decisions, not answers
 
 Part 12 stops taking questions and works the queue. The harness builds Meridian Bank's AML alert queue from `FINANCE`, assembles an evidence pack per alert, decides `ESCALATE` / `KYC_REVIEW` / `DISMISS` with a confidence and a written rationale, records every decision in `AGENT.AML_TRIAGE` and in memory, and reports what the run was worth to the bank — with exactly one labelled assumption in the arithmetic. Autonomy is the same loop plus a **trigger, a record, and a budget**. Guide: [`docs/part-12-autonomous-aml-triage.md`](docs/part-12-autonomous-aml-triage.md).
+
+The running app carries that capstone as a live instrument: the **Autonomous** tab works the newest alerts on demand, replaying a **captured Grok-4.3 triage run** (verbatim decisions and per-step latencies, no live tokens spent; alerts without a capture fall through to the harness's `REVIEW_REQUIRED` path), streaming each evidence pack, tool call, decision and ledger row as it happens — while the world feed keeps landing fresh activity on the same customers. See [`app/README.md` §9](app/README.md).
 
 ## Run it
 
@@ -111,6 +115,7 @@ Then start the app in two terminals: `cd app/backend && python app.py` (→ :800
 - **In-database AI** — `all-MiniLM-L12-v2` embeddings and a cross-encoder reranker via `DBMS_VECTOR.LOAD_ONNX_MODEL`, queried with `VECTOR_EMBEDDING` / `PREDICTION`; Oracle Text (`CONTAINS`) for the keyword leg; Oracle MLE for sandboxed JavaScript.
 - **Identity at the kernel** — `DBMS_RLS` row and column policies on this Free image, and the same persona registry emits `CREATE DATA GRANT` DDL for 26ai Enterprise-class Deep Data Security.
 - **App** — Flask + Socket.IO + eventlet; React 18 + Vite + Tailwind + react-globe.gl. No agent framework: `python-oracledb`, `oracleagentmemory`, and the `openai` SDK pointed at OCI GenAI's OpenAI-compatible endpoint.
+- **LangChain interop** — `langchain-oracledb` (`OracleVS`, `OracleEmbeddings`, `OracleTextSearchRetriever`) over the same store, shown in notebook §3.6; the harness and the app themselves stay framework-free.
 
 ## Where to next
 

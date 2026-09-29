@@ -5,6 +5,7 @@ import ChatPane from "./ChatPane";
 import InstrumentPanel from "./InstrumentPanel";
 import HistoryDrawer from "./HistoryDrawer";
 import { useWorldFocus } from "../hooks/useWorldFocus";
+import { useAmlLoop } from "../hooks/useAmlLoop";
 
 const MIN_FRAC = 0.26;
 const MAX_FRAC = 0.72;
@@ -36,7 +37,7 @@ function RailButton({ icon: Icon, label, onClick, active }) {
  *   ├─ slim rail (new thread · conversations)
  *   └─ workspace (resizable split)
  *      ├─ ChatPane
- *      └─ InstrumentPanel  [World | Context | Data]
+ *      └─ InstrumentPanel  [World | Context | Data | Autonomous]
  *
  * The globe lives in the World tab and is visible by default, in parallel with
  * the chat. Conversation history moved off the permanent left column into a
@@ -54,6 +55,7 @@ export default function Layout({ connected, chat, identity, socket, live }) {
   const workspaceRef = useRef(null);
   const dragging = useRef(false);
   const worldFocus = useWorldFocus(socket);
+  const aml = useAmlLoop(socket);
 
   // Auto-surface the World tab whenever the agent drives the globe.
   useEffect(() => {
@@ -158,6 +160,7 @@ export default function Layout({ connected, chat, identity, socket, live }) {
             isThinking={chat.isThinking}
             live={live}
             identity={identity.identity}
+            aml={aml}
           />
 
           <HistoryDrawer

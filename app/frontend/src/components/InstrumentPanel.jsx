@@ -1,18 +1,21 @@
-import { Database, Brain, Globe2 } from "lucide-react";
+import { Database, Brain, Globe2, Bot } from "lucide-react";
 import WorldExplorer from "./WorldExplorer";
 import MemoryContext from "./MemoryContext";
 import DataExplorer from "./DataExplorer";
+import AutonomousLoop from "./AutonomousLoop";
 
 const TABS = [
-  { key: "world",   label: "World",   icon: Globe2,   text: "text-accent-skill",  bar: "bg-accent-skill" },
-  { key: "context", label: "Context", icon: Brain,    text: "text-accent-memory", bar: "bg-accent-memory" },
-  { key: "data",    label: "Data",    icon: Database, text: "text-accent-oracle", bar: "bg-accent-oracle" },
+  { key: "world",      label: "World",      icon: Globe2,   text: "text-accent-skill",  bar: "bg-accent-skill" },
+  { key: "context",    label: "Context",    icon: Brain,    text: "text-accent-memory", bar: "bg-accent-memory" },
+  { key: "data",       label: "Data",       icon: Database, text: "text-accent-oracle", bar: "bg-accent-oracle" },
+  { key: "autonomous", label: "Autonomous", icon: Bot,      text: "text-accent-oracle", bar: "bg-accent-oracle" },
 ];
 
 /**
- * The right-hand instrument panel. Hosts the three "instruments" — the 3D
- * World, the Memory Context, and the Data Explorer — as tabs so they sit in
- * parallel with the chat instead of competing for the same screen real estate.
+ * The right-hand instrument panel. Hosts the four "instruments" — the 3D
+ * World, the Memory Context, the Data Explorer, and the Autonomous AML loop —
+ * as tabs so they sit in parallel with the chat instead of competing for the
+ * same screen real estate.
  *
  * Width is driven by the `--panel-frac` CSS variable set on the workspace
  * (see Layout); on narrow viewports it collapses to a full-width band below
@@ -23,11 +26,12 @@ export default function InstrumentPanel({
   identityId, agentFocus, focusTarget, lastActivity,
   autoFollow, onToggleAutoFollow, onDismissFocus,
   contextWindow, tokenUsage, touched, trace, isThinking,
-  live, identity,
+  live, identity, aml,
 }) {
   const activeIndex = Math.max(0, TABS.findIndex((t) => t.key === tab));
   const active = TABS[activeIndex];
   const worldLive = !!agentFocus || isThinking;
+  const sweepLive = aml?.state === "running";
 
   return (
     <section className="shrink-0 flex flex-col min-w-0 h-[55vh] w-full border-t border-white/5 lg:h-full lg:w-[var(--panel-frac)] lg:border-t-0 lg:border-l bg-bg-panel">
@@ -48,6 +52,9 @@ export default function InstrumentPanel({
               {t.label}
               {t.key === "world" && worldLive && (
                 <span className="w-1.5 h-1.5 rounded-full bg-accent-skill animate-pulse" title="the globe is following the agent" />
+              )}
+              {t.key === "autonomous" && sweepLive && (
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-oracle animate-pulse" title="the captured triage run is replaying" />
               )}
             </button>
           );
@@ -80,6 +87,9 @@ export default function InstrumentPanel({
         )}
         {tab === "data" && (
           <DataExplorer identityId={identityId} touched={touched} />
+        )}
+        {tab === "autonomous" && (
+          <AutonomousLoop aml={aml} identity={identity} />
         )}
       </div>
     </section>

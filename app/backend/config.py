@@ -134,10 +134,12 @@ AGENT_ID = os.environ.get("EDA_AGENT_ID", "enterprise-data-agent")
 # feels like a production system under real-time load. Set LIVE_FEED=false to
 # disable entirely; the front-end can also pause/resume it at runtime.
 LIVE_FEED = os.environ.get("LIVE_FEED", "true").strip().lower() in ("1", "true", "yes", "on")
-LIVE_FEED_INTERVAL = float(os.environ.get("LIVE_FEED_INTERVAL", "6"))    # seconds between events
+LIVE_FEED_INTERVAL = float(os.environ.get("LIVE_FEED_INTERVAL", "6"))    # mean seconds between events at peak hours
 LIVE_FEED_MAX = int(os.environ.get("LIVE_FEED_MAX", "300"))              # most live rows kept at once
 LIVE_FEED_TTL_MIN = int(os.environ.get("LIVE_FEED_TTL_MIN", "25"))       # age at which live rows are purged
 LIVE_FEED_FLAG_RATE = float(os.environ.get("LIVE_FEED_FLAG_RATE", "0.35"))  # share that hit an AML rule
+LIVE_FEED_SPOTLIGHT = float(os.environ.get("LIVE_FEED_SPOTLIGHT", "0.6"))   # share of flagged events that spotlight a captured AML case
+LIVE_FEED_BURST = float(os.environ.get("LIVE_FEED_BURST", "0.10"))          # chance of entering a burst after an event
 
 # World globe caps. The flagged layer has ~hundreds of rows across the 120-day
 # window; drawing every home-branch → merchant arc saturates the globe, so the
