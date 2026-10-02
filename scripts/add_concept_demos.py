@@ -5,10 +5,10 @@ The 90-minute workshop is concept-driven: each Part teaches a primitive. These
 cells let students *see* the primitive working by contrasting the naive baseline
 against what they just built:
 
-  * 2.2a  — OAMP vs a hand-rolled Python dict
-  * 3.4a  — no similarity search vs `retrieve_knowledge` (TODO 4)
-  * 7.1a  — no context summarization vs OAMP's context card
-  * 7.3a  — no DBFS vs Oracle DBFS (ACID scratch state)
+  * after §2.2 — OAMP vs a hand-rolled Python dict
+  * after §3.4 — no similarity search vs `retrieve_knowledge` (TODO 4)
+  * after §7.1 — no context summarization vs OAMP's context card
+  * after §7.3 — no DBFS vs Oracle DBFS (ACID scratch state; guide: Part 4)
 
 They add NO TODO stubs and NO checkpoints — the exercise count is unchanged.
 The insertion is idempotent: every cell carries a `workshop:concept-demo:<key>`
@@ -29,12 +29,11 @@ NOTEBOOKS = {
     "complete": ROOT / "notebook_complete.ipynb",
 }
 
-# Insertion indices (insert *before* this cell). Complete is the student pair
-# shifted by −1 from cell 51 onward (its TODO-5 checkpoint cell was dropped);
-# the full-source notebook is a different (already-implemented) structure.
+# Insertion indices (insert *before* this cell). Both notebooks have the same
+# cell layout up to the Part 12 block, so the anchors are shared.
 ANCHORS = {
     "student":  {"oamp": 31, "similarity": 52, "context": 74, "dbfs": 83},
-    "complete": {"oamp": 31, "similarity": 51, "context": 73, "dbfs": 82},
+    "complete": {"oamp": 31, "similarity": 52, "context": 74, "dbfs": 83},
 }
 
 
@@ -98,7 +97,7 @@ A substring (`LIKE`) lookup cannot answer a question that shares no words with t
 <!-- workshop:concept-demo:similarity -->"""
 
 SIM_CODE = '''# ============================================================================
-# WITHOUT similarity search vs WITH it — the functions from TODO 4 / 3.4
+# WITHOUT similarity search vs WITH it — the function from TODO 4
 # ============================================================================
 q = "how are transaction amounts stored — dollars or cents?"
 
@@ -187,7 +186,7 @@ print("   §7.1's build_context() calls exactly this and prepends the card to th
 
 DBFS_MD = """## Concept check — DBFS scratch state
 
-Mid-task scratch space is a real problem: a Python variable is not transactional, invisible to other sessions, and gone on restart. Below: a draft in a Python variable, then the same bytes written to **Oracle DBFS** — a filesystem inside the database — and read back through a second connection.
+Mid-task scratch space is a real problem: a Python variable is not transactional, invisible to other sessions, and gone on restart. Below: a draft in a Python variable, then the same bytes written to **Oracle DBFS** — a filesystem inside the database — and read back through a second connection. Guide: [Part 4](docs/part-4-dbfs.md).
 
 <!-- workshop:concept-demo:dbfs -->"""
 

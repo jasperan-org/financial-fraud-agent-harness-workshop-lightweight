@@ -177,7 +177,7 @@ print("  If the preview did not open, use the PORTS tab.")'''
 # --------------------------------------------------------------------------
 PREFLIGHT_MD = """## 1.3 Preflight — is this Codespace ready?
 
-Twelve checks in one table: the `FINANCE` seed, the ONNX embedder and reranker, the Oracle Text index, `toolbox` / `skillbox`, the API keys. Every ❌ prints the command that fixes it; the two checks the rest of the notebook cannot survive raise instead of warning."""
+One table of checks — the `FINANCE` seed, the ONNX embedder and reranker, the Oracle Text index, `toolbox` / `skillbox`, the identity rules (§6.7), the API key. Read-only; safe to re-run. Every ❌ prints the command that fixes it; the two checks the rest of the notebook cannot survive (`FINANCE` seeded, embedder loaded) raise instead of warning."""
 
 
 PREFLIGHT_CODE = '''# §1.3 — Preflight. Reads the same catalogs the agent will scan, and the same env the
@@ -229,6 +229,9 @@ _skillbox = _scalar("SELECT COUNT(*) FROM skillbox", None)
 print(f"  {'✅' if _toolbox is not None else '⚠️ '} {'toolbox / skillbox':<32} "
       f"{_toolbox if _toolbox is not None else 'missing'} tools · "
       f"{_skillbox if _skillbox is not None else 'missing'} skills")
+_identity = _scalar("SELECT COUNT(*) FROM user_objects WHERE object_name = 'SET_EDA_CTX'", 0)
+print(f"  {'✅' if _identity else '⚠️ '} {'identity rules (§6.7)':<32} "
+      f"{'AGENT.SET_EDA_CTX present' if _identity else 'absent — §6.7 needs it: cd app && python scripts/setup_deep_security.py'}")
 
 print("\\nOracle — FINANCE (the bank's data; the agent only ever reads it)")
 FINTECH_TABLES = ("BRANCHES", "CUSTOMERS", "ACCOUNTS", "CARDS", "MERCHANTS",
@@ -279,16 +282,17 @@ print(f"  {'✅' if _keys else '❌'} {'credentials':<32} provider {LLM_PROVIDER
 if LLM_PROVIDER == "oci":
     print(f"     endpoint: {OCI_ENDPOINT}")
 if not _keys:
-    print("     ↳ fix: add OCI_GENAI_API_KEY as a Codespaces secret (then restart), or")
-    print("            echo 'OCI_GENAI_API_KEY=...' >> app/.env  — TODO 1 is the first live call.")
+    print("     ↳ fix: add OCI_GENAI_API_KEY as a Codespaces secret and restart, or export it before")
+    print("            launching Jupyter (the kernel reads the environment, not app/.env) — §1.1 prompts")
+    print("            for it when none is set. TODO 1 is the first live call.")
 
-# The two hard requirements: without these, Blocks 2–12 cannot run.
+# The two hard requirements: without these, Parts 2–12 cannot run.
 if _missing or not _txns:
     raise RuntimeError("FINANCE is not seeded. Fix: " + _seed_fix)
 if not _embedder:
     raise RuntimeError("The in-database embedder is missing. Fix: cd app && python scripts/bootstrap.py")
 
-print("\\n✅ Preflight passed — every block below has what it needs.")'''
+print("\\n✅ Preflight passed — everything below has what it needs.")'''
 
 
 # --------------------------------------------------------------------------

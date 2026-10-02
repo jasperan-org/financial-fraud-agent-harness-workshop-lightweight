@@ -1,6 +1,6 @@
 # Workshop TODO checklist
 
-The canonical workshop is the nine-TODO path in `notebook_student.ipynb`, followed by the **Part 12 capstone** (autonomous AML triage — no TODO; it runs the harness you built). Each checkpoint is an assertion in the notebook: most sit in the cell right after their TODO, and a few run later in the same section so the data they need (registered tools, seeded skills) exists first. A failure identifies the unfinished block before later work depends on it.
+The canonical workshop is the nine-TODO path in `notebook_student.ipynb`, followed by the **Part 12 capstone** (autonomous AML triage — no TODO; it runs the harness you built). Each checkpoint is an assertion in the notebook: most sit in the cell right after their TODO. Exceptions: TODO 6 is verified together with TODO 7 (after `tool_run_sql`, which `retrieve_tools` must be able to find), TODO 8 at the end of its own cell (after the skillbox is populated), and TODO 9 checks the signature and that the stub is gone — the §7.3 demo then runs it for real. Every stub states its inputs, return shape, key Oracle call and its checkpoint. A failure identifies the unfinished block before later work depends on it.
 
 - [ ] **TODO 1 — ask the bare model** in Part 1. Set `QUESTION` and run the chat client with no memory, retrieval, or tools.
 - [ ] **TODO 2 — `OracleONNXEmbedder.embed`** in Part 2. Embed text with the in-database ONNX model, one `VECTOR_EMBEDDING` SELECT per text.
@@ -32,7 +32,7 @@ There is no tenth TODO for identity. The rule set is installed for you by `app/s
 - [ ] Ask *"Which branch regions have the most FLAGGED or BLOCKED transactions?"*
 - [ ] Switch the header persona to **Analyst — Europe & Middle East** and re-ask; watch the rows change.
 - [ ] Open the memory pane and confirm the correction from turn 3 is there.
-- [ ] Switch the header persona to **Compliance Officer** and ask for Suspicious Activity Reports: **15** rows. Switch to **Analyst (default)** and ask the same thing: **0** rows. Nothing in the UI changed — the database answered differently.
+- [ ] Switch the header persona to **Compliance Officer** and ask for Suspicious Activity Reports: **all of them** (117 in the seed; the §1.3 preflight prints the count). Switch to **Analyst (default)** and ask the same thing: **0** rows. Nothing in the UI changed — the database answered differently.
 
 ## The capstone — Part 12, autonomy
 
@@ -58,8 +58,8 @@ Parts 4 (DBFS scratchpad), 5 (Oracle MLE), 8 (identity-aware data access), 9 (JS
 - **[§6.6 in the notebook](../notebook_student.ipynb)** — Oracle MLE (`exec_js`), Oracle Spatial (`merchants_near`), duality views (`account_document`). Guides: [Part 5](part-5-mle.md), [Part 9](part-9-duality-views.md).
 - **[§6.7 in the notebook](../notebook_student.ipynb)** — identity: the same query under five end users, enforced by the kernel. Guide: [Part 8](part-8-deep-data-security.md).
 - **[§7.4 in the notebook](../notebook_student.ipynb)** — tool-output offload with retention on the offloaded rows. Guide: [Part 11](part-11-tool-output-offload.md).
-- **[§7.3a in the notebook](../notebook_student.ipynb)** — DBFS: write a draft, read it back through a second connection. Guide: [Part 4](part-4-dbfs.md).
+- **The DBFS concept check in the notebook** (after §7.3) — write a draft, read it back through a second connection. Guide: [Part 4](part-4-dbfs.md).
 
 - [`notebook_complete.ipynb`](../notebook_complete.ipynb) — the same notebook with every TODO solved (and its outputs saved, so it reads top to bottom without a run).
 
-To deploy this harness against an Oracle that isn't the workshop Codespace, run the same provisioning the Codespace runs: `cd app && python scripts/bootstrap.py && python scripts/seed.py && python scripts/setup_advanced.py && python scripts/setup_deep_security.py` — all idempotent, all explained in [`part-1-setup.md`](part-1-setup.md).
+To deploy this harness against an Oracle that isn't the workshop Codespace, run the same provisioning the Codespace runs: `cd app && python scripts/bootstrap.py && python scripts/seed.py && python scripts/setup_advanced.py && python scripts/setup_deep_security.py` — in that order (`seed.py` drops and recreates `FINANCE`, so `setup_deep_security.py` must follow it; `provision.sh` sequences all four and is safe to re-run), all explained in [`part-1-setup.md`](part-1-setup.md).
