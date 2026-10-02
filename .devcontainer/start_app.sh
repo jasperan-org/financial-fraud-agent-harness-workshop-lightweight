@@ -25,11 +25,11 @@ mkdir -p "$LOG_DIR"
 # -----------------------------------------------------------------------------
 echo ""
 echo "[1/3] Provisioning Oracle (idempotent — only what is missing gets built)..."
-bash "$WORKSPACE/.devcontainer/provision.sh"
-if [ $? -ne 0 ]; then
+if ! bash "$WORKSPACE/.devcontainer/provision.sh"; then
   echo "  ERROR: Oracle never came up. Run:  docker logs oracle-free"
   exit 1
 fi
+ORACLE_OK=1
 
 # -----------------------------------------------------------------------------
 # 3. Backend
@@ -37,7 +37,9 @@ fi
 echo ""
 echo "[2/3] Starting agent backend on :8000 (logs → $LOG_DIR/backend.log)..."
 
-pkill -f "python app.py" 2>/dev/null
+# Match how we launch it below (`python -u app.py`); the old pattern
+# "python app.py" never matched, so a restart collided on :8000.
+pkill -f "python -u app.py" 2>/dev/null
 sleep 1
 
 # setsid puts the backend in its own session so it survives this script
@@ -89,7 +91,7 @@ if [ ! -d "$WORKSPACE/app/frontend/node_modules" ]; then
   cd "$WORKSPACE"
 fi
 
-pkill -f "vite" 2>/dev/null
+pkill -f "$WORKSPACE/app/frontend/node_modules/vite/bin/vite.js" 2>/dev/null
 sleep 1
 
 # Run vite directly (not through `npm run dev`) so we don't have an extra npm

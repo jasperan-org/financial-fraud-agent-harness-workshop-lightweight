@@ -40,7 +40,7 @@ The agent acts as a **persona with clearance**, not the database as god: `agent`
 
 - **Seed & schema:** `app/backend/db/seed_finance.py` (deterministic, `random.seed(42)`) — DDL, spatial metadata, duality views, AML patterns, SARs. Run by `app/scripts/seed.py`.
 - **Data model:** `FINANCE.{branches, customers, accounts, cards, merchants, transactions, loans, sar_reports}` over `VECTOR(384, FLOAT32)`-indexed OAMP memory + `toolbox`/`skillbox`.
-- **Agent loop:** `app/backend/agent/harness.py` (~100 lines) + `system_prompt.py` (money-in-cents, flag_reason semantics, identity rules).
+- **Agent loop:** `app/backend/agent/harness.py` (~370 lines) + `system_prompt.py` (money-in-cents, flag_reason semantics, identity rules).
 - **Tools:** `app/backend/agent/tools.py` — `search_knowledge`, `run_sql`, `exec_js`, `get_document`, `query_documents`, `scan_database`, `search_tavily`, `focus_world`, DBFS scratchpad.
 - **Notebook mirror:** `notebook_student.ipynb` builds the same harness primitive-by-primitive with hard-stop asserts.
 
@@ -50,8 +50,7 @@ The agent acts as a **persona with clearance**, not the database as god: `agent`
 
 ## Architecture at a glance (high level)
 
-The demo is **Agent = Model + Harness** on one database: a React/Socket.IO chat UI drives a ~100-line Python agent loop that retrieves vector-indexed tools, assembles context from OAMP memory + the skillbox manifest, calls the LLM (OpenAI or OCI GenAI with mid-turn fallback), and dispatches tools that run *entirely inside Oracle AI Database 26ai* — hybrid retrieval on `VECTOR(384, FLOAT32)` + HNSW, in-DB ONNX embeddings/reranking, Oracle MLE JavaScript, DBFS scratchpad, Oracle Spatial on `SDO_GEOMETRY`, JSON Relational Duality Views, and persona-based row/column authorization.
+The demo is **Agent = Model + Harness** on one database: a React/Socket.IO chat UI drives a ~370-line Python agent loop that retrieves vector-indexed tools, assembles context from OAMP memory + the skillbox manifest, calls the LLM (OCI GenAI by default; OpenAI as an optional mid-turn fallback), and dispatches tools that run *entirely inside Oracle AI Database 26ai* — hybrid retrieval on `VECTOR(384, FLOAT32)` + HNSW, in-DB ONNX embeddings/reranking, Oracle MLE JavaScript, DBFS scratchpad, Oracle Spatial on `SDO_GEOMETRY`, JSON Relational Duality Views, and persona-based row/column authorization.
 
 - **Diagram (Excalidraw, shareable):** https://excalidraw.com/#json=iAjKM7zP9mKKOADMYNtLj,8p5kQ15osB9FDHPqarGJSg
 - **Diagram source files:** `docs/architecture-high-level.excalidraw` (editable scene) · `images/architecture-excalidraw.png` (rendered)
-- **Live editable copy:** the excalidraw canvas is running at `http://localhost:4000` (same scene, real-time sync) — the canvas server + MCP config live in the repo checkout at `~/git/mcp_excalidraw`, registered for pi in `~/.pi/agent/mcp.json`.

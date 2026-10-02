@@ -10,7 +10,7 @@ The formula:
 Agent = Model + Harness
 ```
 
-The model emits tokens. Everything else — state, memory, tool dispatch, identity, budgets, retry logic — is **harness code**. Most "agent quality" complaints are harness problems, not model problems. Part 1 connects the notebook to Oracle; the later parts implement the five core harness blocks.
+The model emits tokens. Everything else — state, memory, tool dispatch, identity, budgets, retry logic — is **harness code**. Most "agent quality" complaints are harness problems, not model problems. Part 1 connects the notebook to Oracle; the later parts implement the core harness.
 
 ## Canonical environment
 
@@ -28,7 +28,7 @@ In Codespaces, `.devcontainer/provision.sh` boots Oracle, then runs — on every
 
 | Script | What it provisions |
 |---|---|
-| [`app/scripts/bootstrap.py`](../app/scripts/bootstrap.py) | `AGENT` user, `vector_memory_size` / `pga_aggregate_limit`, the in-DB ONNX embedder, DBFS |
+| [`app/scripts/bootstrap.py`](../app/scripts/bootstrap.py) | `AGENT` user, `vector_memory_size`, the in-DB ONNX embedder, DBFS |
 | [`app/scripts/seed.py`](../app/scripts/seed.py) | the `FINANCE` schema, the AML seed data, the duality views, the skillbox |
 | [`app/scripts/setup_advanced.py`](../app/scripts/setup_advanced.py) | the Oracle Text index and the scheduler job |
 | [`app/scripts/setup_deep_security.py`](../app/scripts/setup_deep_security.py) | the identity rules (Deep Data Security on Enterprise-class, `DBMS_RLS` on Free) |
@@ -60,9 +60,9 @@ The app normalizes a bare OCI regional endpoint by appending `/openai/v1`; the n
 
 **`vector_memory_size`** — Oracle 26ai keeps HNSW vector indexes in a dedicated in-memory pool. On a stock Free image it ships at `0`, so any `CREATE VECTOR INDEX ... ORGANIZATION INMEMORY NEIGHBOR GRAPH` raises `ORA-51962` and your retrieval silently degrades to full-table cosine scans. The bootstrap allocates 512 MiB at SPFILE scope; the first time it does so Oracle needs a restart, which the devcontainer handles.
 
-**`pga_aggregate_limit`** — the cross-encoder reranker allocates enough transient PGA per call that the Free build's default ceiling (~2 GiB) is exceeded under modest load, surfacing as `ORA-04036`. The bootstrap raises it to 4 GiB at the CDB level.
+**`pga_aggregate_limit`** — the cross-encoder reranker allocates enough transient PGA per call that the Free build's default ceiling (2 GiB) can be exceeded under load, surfacing as `ORA-04036`. Nothing in the provisioning scripts changes it: if you see `ORA-04036`, raise it by hand to 4 GiB at the CDB level ([troubleshooting](troubleshooting.md)).
 
-You don't need to remember the details — both are configured for you. They're explained here so you know what to look up if you hit these errors against a non-Codespaces database.
+`vector_memory_size` is configured for you. It is explained here so you know what to look up if you hit `ORA-51962` against a non-Codespaces database.
 
 ## Connect in the notebook
 
@@ -87,7 +87,7 @@ Each ❌ row prints the command that fixes it (`cd app && python scripts/bootstr
 
 The preflight takes the §1.3 slot; the chat-client section that follows is §1.4.
 
-If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, and `setup_deep_security.py` — the Codespace runs exactly those four, in that order, on every launch (`.devcontainer/provision.sh`, idempotent: whatever is already in place is left alone).
+If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, and `setup_deep_security.py` — the Codespace runs exactly those four, in that order, whenever a layer is missing (`.devcontainer/provision.sh`; whatever is already in place is left alone). `seed.py` itself is not idempotent — it drops and recreates `FINANCE`, including its policies — which is why `setup_deep_security.py` always runs after it.
 
 ### Kernel dependencies
 

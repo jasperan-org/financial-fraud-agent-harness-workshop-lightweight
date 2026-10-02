@@ -223,16 +223,18 @@ In the notebook the same boundary is one cell: **§6.7** runs the same three que
 identities (`AGENT.SET_EDA_CTX` before each read) and prints the transaction count, the amount sum
 and the SAR row count that the kernel returns for each. There is no separate "Part 8 section" to
 generate, and no notebook-side filter to keep in sync — the notebook never filters rows itself.
-`tool_run_sql` in the app adds the one production rule the notebook cell does not need: set the
-context from the request's end user before every statement.
+`tool_run_sql` in the app adds the one production rule the notebook cell does not need: every call
+borrows a private READ ONLY `AGENT` session (`db.deep_security.identity_session`), sets the
+context from the request's end user on it, and rolls back and clears it on release.
 
 > ⚠️ **Two honest caveats.**
 > 1. **The VPD path is fail-open.** With no context set, every predicate evaluates to `1=1` and all
 >    rows are visible. Deep Sec is default-deny. That is the single biggest behavioural difference
 >    between what this repo demonstrates and what the feature provides.
-> 2. **The app shares one connection across turns.** Setting a session context on a shared connection
->    is safe only because each read sets it immediately before executing. A production harness would
->    use one connection (or a session pool with fixed contexts) per concurrent turn.
+> 2. **The shared connection is never used for identity reads.** `EDA_CTX` lives in the database
+>    session, so setting a persona on the app's one shared `AGENT` connection would let concurrent
+>    requests overwrite each other's persona. `identity_session` instead hands each call one of a
+>    semaphore-bounded pool (8) of private sessions; one that cannot be proven clean is dropped, not reused.
 
 ## Agent memory is data too — OAMP 26.8 Deep Data Security
 
@@ -355,8 +357,8 @@ python scripts/build_student_notebook.py    # validates every checked-in noteboo
 
 - **Notebook:** §6.7 — the identity table (five end users, three queries).
 - **App:** `app/backend/db/deep_security.py` (probe, VPD backend, Deep Sec DDL emitter),
-  `app/backend/api/identities.py` (the persona registry) and the per-statement `SET_EDA_CTX` inside
-  `tool_run_sql`.
+  `app/backend/api/identities.py` (the persona registry) and `identity_session` in `deep_security.py`,
+  which `tool_run_sql` and the Data Explorer use to set `EDA_CTX` per call.
 - **DDL for an Enterprise-class instance:** `app/scripts/setup_deep_security.py --ddl-only` writes
   `app/scripts/out/deep_sec_ddl.sql`.
 

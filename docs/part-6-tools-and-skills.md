@@ -137,11 +137,12 @@ def tool_run_sql(sql: str, max_rows: int = 50) -> str:
         return json.dumps({"error": str(e)})
 ```
 
-Notice three things:
+Notice four things:
 
 - **The docstring is the tool description.** It tells the LLM *when* to call this tool, not just *how*. Prefer "Use this when..." phrasing.
 - **`json.dumps(..., default=str)`** handles `datetime`, `Decimal`, etc. that aren't JSON-native. Without this, dates raise `TypeError`.
 - **Error handling returns JSON.** The LLM reads the tool output as a string; an error in JSON form is something it can react to ("the column doesn't exist, let me check the schema").
+- **The regex is a first fence, not the boundary.** It does not parse SQL. What actually stops a hostile query is the kernel: the identity policies (§6.7, [Part 8](part-8-deep-data-security.md)) decide which rows come back, and the app runs every `run_sql` on a private READ ONLY session (`identity_session` in `app/backend/db/deep_security.py`) with a denylist for dynamic-SQL packages and `FOR UPDATE`. The notebook leaves `agent_conn` alone because OAMP's background writes share it.
 
 After this cell runs, `tool_run_sql` is in the `TOOLS` registry and a row in the `toolbox` table.
 
@@ -186,7 +187,7 @@ Two procedural-memory tables, parallel structures:
 
 **Source: [`oracle/skills/db`](https://github.com/oracle/skills/tree/main/db).** Oracle publishes a curated library — 100+ guides organized by category (`agent`, `performance`, `security`, `plsql`, `sqlcl`, …). Each `.md` file is a skill: an H1 title, a first-paragraph description, and a body of prose + SQL examples.
 
-The pre-built ingestion cell mirrors them into `skillbox` with their content SHA so re-ingestion is idempotent. `~155 skills × ~5 KB → 15 KB per turn` if we always-injected — far too much. Instead:
+The pre-built ingestion cell mirrors them into `skillbox` with their content SHA so re-ingestion is idempotent. `~165 skills × ~5 KB → ~800 KB if we always-injected` — far too much. Instead:
 
 - The **manifest** (top-3 skill names + descriptions, ~200 tokens) is prepended to every prompt by `build_skill_manifest`.
 - The **full body** is one `load_skill(name)` tool call away.

@@ -16,6 +16,7 @@
 
 set +e
 set -u
+set -o pipefail   # `cmd | tee | tail` must report cmd's failure, not tail's
 
 WORKSPACE="${WORKSPACE:-$(pwd)}"
 LOG_DIR="$WORKSPACE/.devcontainer/logs"
@@ -72,8 +73,11 @@ if [ $PROBE_ONLY -eq 0 ]; then
       echo "  container exists but is stopped — starting it"
       docker start oracle-free > /dev/null 2>&1
     else
-      docker compose -f "$WORKSPACE/.devcontainer/docker-compose.yml" up -d oracle > /dev/null 2>&1
-      echo "  container created"
+      if docker compose -f "$WORKSPACE/.devcontainer/docker-compose.yml" up -d oracle > /dev/null 2>&1; then
+        echo "  container created"
+      else
+        echo "  ERROR: docker compose up failed — run: docker compose -f .devcontainer/docker-compose.yml up oracle"
+      fi
     fi
   else
     echo "  container already running"
@@ -107,6 +111,7 @@ fi
 # receives OCI/Oracle config as Codespaces secrets. Materialise both, so a
 # rotated secret reaches the app on the next start (lifecycle shells do not
 # reliably inherit the interactive environment).
+if [ $PROBE_ONLY -eq 0 ]; then
 echo ""
 echo "[4/5] Materializing app/.env..."
 if [ ! -f "$WORKSPACE/app/.env" ]; then
@@ -145,6 +150,7 @@ for key in ("OCI_GENAI_API_KEY", "OCI_GENAI_ENDPOINT", "TAVILY_API_KEY"):
 env_path.write_text(text)
 print(f"  patched {env_path} with the available secrets")
 PYEOF
+fi
 
 # --- 5. Layer probe: run only what is missing ------------------------------
 echo ""
@@ -155,7 +161,7 @@ PROBE="$(WORKSPACE="$WORKSPACE" "$PY" - <<'PYEOF'
 import os, pathlib, sys
 
 env_path = pathlib.Path(os.environ["WORKSPACE"]) / "app" / ".env"
-for line in env_path.read_text().splitlines():
+for line in (env_path.read_text().splitlines() if env_path.exists() else []):
     line = line.strip()
     if line and not line.startswith("#") and "=" in line:
         key, value = line.split("=", 1)
@@ -215,7 +221,13 @@ PYEOF
 
 echo "$PROBE" | sed 's/^/  /'
 
-need() { echo "$PROBE" | grep -q "^$1=ok" && return 1 || return 0; }
+if [ $PROBE_ONLY -eq 1 ]; then
+  echo ""
+  echo "  --probe-only: nothing was changed."
+  exit 0
+fi
+
+need() { grep -q "^$1=ok" <<<"$PROBE" && return 1 || return 0; }
 
 if need BOOTSTRAP; then
   echo ""

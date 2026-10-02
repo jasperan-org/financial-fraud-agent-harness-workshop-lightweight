@@ -13,7 +13,7 @@ This app is a working reference for building a **production-shaped agent harness
 
 ### 1. The agent harness pattern: `Agent = Model + Harness`
 
-The chat loop in `agent/harness.py` is ~100 lines of Python. Read it once and you understand the entire control flow: build a context (skill manifest + OAMP context card + retrieved schema facts + persona block), retrieve top-k tools by vector similarity over `toolbox`, call the LLM, dispatch any tool calls, offload full outputs to OAMP and inline a compact reference back into the prompt, repeat until the model returns plain text or the budget runs out, then guard-stop with a forced finalization. **No planner, no router, no sub-agent spawning.** The model picks the path; the harness owns state integrity.
+The chat loop in `agent/harness.py` (~370 lines of Python) is short enough to read in one sitting. Read it once and you understand the entire control flow: build a context (skill manifest + OAMP context card + retrieved schema facts + persona block), retrieve top-k tools by vector similarity over `toolbox`, call the LLM, dispatch any tool calls, offload full outputs to OAMP and inline a compact reference back into the prompt, repeat until the model returns plain text or the budget runs out, then guard-stop with a forced finalization. **No planner, no router, no sub-agent spawning.** The model picks the path; the harness owns state integrity.
 
 You'll learn:
 
@@ -29,7 +29,8 @@ The trust boundary follows the **end user**, not the database connection. Pick a
 | Persona | Clearance | Regions | Effect |
 |---|---|---|---|
 | `agent` (default) | STANDARD | all | financials masked + admin tables forbidden |
-| `cfo` | EXECUTIVE | all | full visibility |
+| `cfo` | EXECUTIVE | all | full financial visibility; `SAR_REPORTS` still forbidden |
+| `compliance.officer` | EXECUTIVE | all | full visibility, and the only persona that can read `SAR_REPORTS` |
 | `analyst.east` | STANDARD | EUROPE + MIDDLE_EAST | regional row filter + amounts masked |
 | `analyst.west` | STANDARD | AMERICAS + ASIA_PACIFIC | regional row filter + amounts masked |
 | `ops.viewer` | STANDARD | all | customer + SAR tables forbidden + account/card ids and amounts masked |
@@ -37,7 +38,7 @@ The trust boundary follows the **end user**, not the database connection. Pick a
 You'll learn:
 
 - **The enforcement runs in the database, not in the view.** `db/deep_security.py` probes the instance and drives the strongest backend it has: Oracle **Deep Data Security** (`CREATE DATA GRANT`) on a 26ai Enterprise-class instance, or **`DBMS_RLS`** (VPD) row and column policies where it doesn't — which is the case on the 26ai **Free** image this demo ships on. `api/identities.py` is the single source of truth for both, and `scripts/setup_deep_security.py --ddl-only` emits the Deep Sec migration to `app/scripts/out/deep_sec_ddl.sql`.
-- How to wire identity through *both* the data explorer (REST) and the chat agent: every read calls `AGENT.set_eda_ctx` **before** it executes, so the kernel decides which rows and columns come back. The Python post-filters stay in place as defence in depth and become no-ops once the database has already answered correctly. A per-turn `threading.local` carries the end user.
+- How to wire identity through *both* the data explorer (REST) and the chat agent: every read runs on a private READ ONLY `AGENT` session (`db.deep_security.identity_session`) that calls `AGENT.set_eda_ctx` **before** it executes, so the kernel decides which rows and columns come back. A per-call session — not the shared connection — is what stops one request's persona bleeding into a concurrent one. The Python post-filters stay in place as defence in depth and become no-ops once the database has already answered correctly. A per-turn `threading.local` carries the end user.
 - How to make denials *useful*: when the agent hits a forbidden table, it tells the user the persona name, the missing privilege, and which higher-clearance persona would unblock the query. No generic "access denied" — every denial is grounded in a named role.
 - The starter-prompt **"expected: denied"** chips on the welcome mat let you click straight into a deny path so you can see the boundary in action.
 
@@ -63,7 +64,7 @@ The harness is deliberately built from primitives the database already ships, so
 | DBFS (Database File System over SecureFile LOBs) | `db/dbfs.py` — POSIX-like scratchpad mounted at `/scratch`, scoped per-thread |
 | JSON Relational Duality Views | `account_dv` and `customer_dv` (created in `db/seed_finance.py`); agent reads via `tool_get_document` / `tool_query_documents` |
 | Oracle Spatial | `SDO_GEOMETRY` columns, `MDSYS.SPATIAL_INDEX_V2`, `SDO_WITHIN_DISTANCE`, SRID 8307 (WGS84) |
-| `DBMS_SCHEDULER` | scaffolded for periodic schema rescans |
+| `DBMS_SCHEDULER` | periodic schema rescans: the job enqueues `scan_history` rows, and the backend's drain loop (`start_drain_loop` in `db/scheduler_setup.py`) processes the queue every 60 s |
 | `DBMS_RLS` + application context (VPD) | `db/deep_security.py` — capability probe, persona→policy projection, and the installer in `scripts/setup_deep_security.py` |
 | Deep Data Security (`CREATE DATA GRANT`) | same module, `deep_sec_ddl()` — generated for 26ai Enterprise-class, not executable on Free |
 | Agent Memory Deep Data Security (OAMP >= 26.8) | same module — `UserOwnRows` + `GlobalMemories` policies over the OAMP store via the SDK; runtime identity via `OracleMemoryEndUserSecurityContext` |
@@ -78,7 +79,8 @@ The Oracle AI Agent Memory Package (`oracleagentmemory`) owns long-term semantic
 - **Threads, memories, context cards** — three OAMP primitives that replace half a dozen hand-rolled tables. The store's managed objects are named by `memory_store_id="EDA_ONNX"` (`EDA_ONNX_MEMORY`, `EDA_ONNX_THREAD`, …).
 - **Kernel-scoped memories (OAMP >= 26.8, Deep Sec databases)** — `UserOwnRowsDeepDataSecurityPolicy` + `GlobalMemoriesDeepDataSecurityPolicy` put the memory store under data-role/data-grant enforcement, and `OracleMemoryEndUserSecurityContext` attaches the acting end user to every memory read/write. On the shipped 26ai Free container this layer is probed and reported by `scripts/setup_deep_security.py`, not faked; there, thread scoping remains the runtime boundary.
 - **Memory relations** — corrections supersede the fact they replace (OAMP retires the old memory), `link_memories` connects facts the agent already knows, and the scanner links every column/relationship fact to its table fact with `supports`. Retrieval can follow one hop (`search_knowledge(follow_links=True)`), so a retired fact stays reachable as history instead of vanishing. The right pane renders the relations under each memory.
-- **Auto-extraction** — every few messages, OAMP runs the configured LLM (Grok-4 in the current `.env`) to mine durable facts and refresh a rolling thread summary. The harness tolerates auth failures here so a bad LLM config never takes down chat.
+- **Auto-extraction** — every few messages, OAMP's background worker runs the configured LLM (Grok-4 in the current `.env`) to mine durable facts (marked `$agent_memory.extraction_id` in their metadata, distinct from the harness's own `kind=` memories) and refresh a rolling thread summary. The harness tolerates auth failures here so a bad LLM config never takes down chat.
+- **Concurrency** — the app runs on real OS threads (Socket.IO `threading` mode, no monkey-patching) because OAMP's extraction worker needs its own asyncio loop. OAMP isn't thread-safe, so `memory/manager.py` wraps the client (and its thread objects and store) in a proxy that serialises every call behind one app-wide `OAMP_LOCK` (like the notebook's `_OAMP_LOCK`; never held across an LLM call), and gives the client its own connection pool so the background worker never shares a session with foreground calls.
 - **Thread-scoped scratchpad** — every `scratch_write` lands at `/scratch/threads/<thread_id>/<path>`; two threads writing `findings.md` cannot collide. Verified in the data explorer's DBFS tab (each row carries its `THREAD_ID` column).
 - **Episodic memory** — `(user, assistant)` pairs from each turn are stored as OAMP memories tagged `kind=episodic` with their `thread_id`.
 - **Tool-output memory** — every tool call's full output is stored once and referenced by `tool_call_id`; the agent recovers via `fetch_tool_output(tool_call_id=...)`.
@@ -124,7 +126,7 @@ You'll learn how to plumb an agent tool through to live front-end state via a pe
 
 ### 8. Live data feed — a production feel
 
-The app can also *simulate the bank operating*. `db/live_feed.py` runs a background greenlet that inserts new transactions on a **diurnal Poisson schedule** — `LIVE_FEED_INTERVAL` is the *peak-hour* mean gap (6 s), scaled down by hour-of-day (quiet overnight) and by a weekend factor, with occasional 3–5 event **bursts** (`LIVE_FEED_BURST`) — mostly ordinary card activity, ~35% fresh AML hits (STRUCTURING, GEO_VELOCITY, HIGH_RISK_COUNTRY, RAPID_CASH_OUT, LARGE_CASH_DEPOSIT) — and broadcasts each over Socket.IO as `live_txn`. A share `LIVE_FEED_SPOTLIGHT` (60%) of the flagged events instead **replays a case the autonomous triage captured**: the event lands on that customer's own account, carrying the case's typology, size and block outcome, so the globe and the AML panel tell the same story. The World panel:
+The app can also *simulate the bank operating*. `db/live_feed.py` runs a background thread that inserts new transactions on a **diurnal Poisson schedule** — `LIVE_FEED_INTERVAL` is the *peak-hour* mean gap (6 s), scaled down by hour-of-day (quiet overnight) and by a weekend factor, with occasional 3–5 event **bursts** (`LIVE_FEED_BURST`) — mostly ordinary card activity, ~35% fresh AML hits (STRUCTURING, GEO_VELOCITY, HIGH_RISK_COUNTRY, RAPID_CASH_OUT, LARGE_CASH_DEPOSIT) — and broadcasts each over Socket.IO as `live_txn`. A share `LIVE_FEED_SPOTLIGHT` (60%) of the flagged events instead **replays a case the autonomous triage captured**: the event lands on that customer's own account, carrying the case's typology, size and block outcome, so the globe and the AML panel tell the same story. The World panel:
 
 - **Pulses a marker** at the merchant (or the account's home branch for the cash rules) and draws a **home-branch → merchant arc** for each new hit.
 - **Flashes the arrival** — white-hot, thicker, faster for ~2.2 s with a ring ping at the destination — then cools into its AML colour while the halos already on the globe keep gliding; intensity thereafter tracks age (45 s half-life), and the oldest halo dissipates when an 11th arrives.
@@ -194,7 +196,7 @@ You'll learn how to ship an agent that doesn't go dark when a provider has a bad
 
 ### 12. The "boring on purpose" closing note
 
-The whole thing is ~1500 lines of Python and ~2500 lines of React. The app itself uses no agent framework — no LangChain, no AutoGen, no LlamaIndex — just `python-oracledb`, `oracleagentmemory`, `openai`, and the OpenAI-compatible OCI endpoint. (The notebook shows the LangChain *interop* in §3.6 — `OracleEmbeddings` + `OracleVS` over the same store — because plenty of teams arrive with a LangChain app; the harness in this folder deliberately does not need it.) The point of the app is to show how much of an enterprise agent's hard problems (memory, identity, observability, sandboxing, durable state, semantic retrieval over your own data) are already solvable with primitives Oracle AI Database 26ai ships out of the box. Read the harness end-to-end. You should know exactly where every decision is made and every side effect lands.
+The whole thing is ~10,000 lines of Python and ~4,300 lines of React (the harness loop itself is ~370). The app itself uses no agent framework — no LangChain, no AutoGen, no LlamaIndex — just `python-oracledb`, `oracleagentmemory`, `openai`, and the OpenAI-compatible OCI endpoint. (The notebook shows the LangChain *interop* in §3.6 — `OracleEmbeddings` + `OracleVS` over the same store — because plenty of teams arrive with a LangChain app; the harness in this folder deliberately does not need it.)
 
 ```
 Browser (React SPA)
@@ -210,10 +212,10 @@ WebSocket + REST (Socket.IO)
   ├─ request_context_window  -- on-demand context refresh
   ├─ live_txn / live_feed_*  -- the simulated bank feed (diurnal Poisson arrivals)
   ├─ aml_sweep_run / aml_*   -- the autonomous AML sweep (queue, steps, decisions)
-  └─ /api/threads, /api/context/<thread_id>, /api/world, /api/health
+  └─ /api/threads, /api/context/<thread_id>, /api/world, /api/health (pings Oracle; 503 + "degraded" if it does not answer)
 
-Flask API (Python / eventlet)
-  ├─ agent/harness.py        -- the §11 loop, with skill manifest prepended (§11.5)
+Flask API (Python · Socket.IO threading mode)
+  ├─ agent/harness.py        -- the notebook's §7.2 loop, with the skill manifest prepended (§6.4)
   ├─ agent/tools.py          -- search_knowledge · run_sql · exec_js · remember ·
   │                             scan_database · load_skill · list_skills
   ├─ agent/skills.py         -- skillbox (Oracle skills repo ingestion)
@@ -221,7 +223,7 @@ Flask API (Python / eventlet)
   ├─ agent/aml_capture.py    -- the captured Grok triage run (pure data)
   ├─ agent/aml_replay.py     -- replays it over the live alert queue; AGENT.AML_REPLAY
   ├─ memory/manager.py       -- OAMP client + in-DB ONNX embedder
-  ├─ retrieval/scanner.py    -- §5 scanner condensed
+  ├─ retrieval/scanner.py    -- notebook §2.4 scanner, condensed
   ├─ db/live_feed.py         -- the simulated bank: diurnal Poisson inserts + spotlight
   └─ api/{routes, events, context}.py
 
@@ -238,11 +240,11 @@ python-oracledb (thin)
 - A running Oracle Free container (the app expects `oracle-free` on `localhost:1521/FREEPDB1`; override via `ORACLE_DSN` if different)
 - Python 3.11+
 - Node.js 18+
-- An OpenAI API key (or OCI GenAI credentials)
+- OCI GenAI credentials (`OCI_GENAI_API_KEY`); an OpenAI key is only an optional fallback
 
 The app no longer requires the notebook to have been run — `scripts/bootstrap.py` handles every prerequisite that the notebook used to set up.
 
-**In the Codespace all of this is automatic.** `.devcontainer/provision.sh` runs on container create and again on every start, probing each layer (`AGENT` schema + ONNX embedder, the `FINANCE` seed + duality views + skillbox, the Oracle Text index, the identity rules) and running only the script whose layer is missing. `bash .devcontainer/provision.sh --probe-only` prints what it finds; the four scripts below are the manual path.
+**In the Codespace all of this is automatic.** `.devcontainer/provision.sh` runs on container create and again on every start, probing each layer (`AGENT` schema + ONNX embedder, the `FINANCE` seed + duality views + skillbox, the Oracle Text index, the identity rules) and running only the script whose layer is missing. `bash .devcontainer/provision.sh --probe-only` prints what it finds; the four scripts below are the manual path. Run by hand, `seed.py` drops and recreates `FINANCE`, which wipes its RLS policies — always follow it with `setup_deep_security.py` (the provisioner does: the policy probe fails after a reseed, so identity is reinstalled).
 
 ## Setup
 
@@ -251,7 +253,7 @@ cd app
 
 # Configure env
 cp .env.example .env
-# edit .env — at minimum set OPENAI_API_KEY
+# edit .env — at minimum set OCI_GENAI_API_KEY
 
 # Backend
 python -m venv .venv
@@ -272,14 +274,14 @@ Walks through six steps:
 
 1. Create the `AGENT` user with every grant the harness needs (CONNECT, RESOURCE, MLE, DBFS, MINING MODEL, V$SQL/V$SQLSTATS catalog access).
 2. `ALTER SYSTEM SET vector_memory_size = 512M SCOPE=SPFILE CONTAINER=ALL`.
-3. If the running instance hasn't picked up the pool, **auto-bounce** the container (`docker restart oracle-free`) and wait for FREEPDB1 to come back. Pass `--no-bounce` to skip and bounce yourself.
+3. If the running instance hasn't picked up the pool, **auto-bounce** the container (`docker restart $ORACLE_CONTAINER`, default `oracle-free`) and wait for FREEPDB1 to come back. Pass `--no-bounce` to skip and bounce yourself.
 4. Stage + register the `ALL_MINILM_L12_V2` ONNX embedder (~117 MB download, copies into the container, `DBMS_VECTOR.LOAD_ONNX_MODEL`).
 5. Create the DBFS scratchpad (tablespace + store + mount at `/scratch`).
 6. Create empty `toolbox` and `skillbox` tables in `AGENT`.
 
 After this you have an Oracle that's ready for the agent. No notebook required.
 
-## Seed (idempotent)
+## Seed (destructive: resets FINANCE)
 
 ```bash
 python scripts/seed.py
@@ -290,11 +292,11 @@ Populates the demo data on top of the bootstrap:
 - Drops + recreates the `FINANCE` schema (60 branches + 140 merchants with `SDO_GEOMETRY`, 2,000 customers, 2,650 accounts, ~3,000 cards, ~23,600 transactions incl. AML patterns, 900 loans, 117 SAR reports, + the AML operational tables) and gathers optimizer statistics
 - Creates `account_dv` and `customer_dv` JSON Relational Duality Views
 - Scans the schema into OAMP institutional knowledge
-- Ingests `oracle/skills` into the skillbox (~155 markdown skills)
+- Ingests `oracle/skills` into the skillbox (~165 markdown skills at last count; the repo moves)
 
-Re-runnable any time to refresh the demo dataset.
+Re-runnable to reset the demo dataset, but not idempotent: it drops `FINANCE` (RLS policies and live-feed rows included), so run `setup_deep_security.py` afterwards.
 
-## Identity rules (idempotent)
+## Identity rules (idempotent; re-run after any reseed)
 
 ```bash
 python scripts/setup_deep_security.py             # probe + install
@@ -330,7 +332,7 @@ Open <http://localhost:3000>. Send a message. Watch the right pane fill in.
 
 **Memory context pane (right):**
 
-Five collapsible sections, each one populated after every turn:
+The main sections (the Context tab renders a few more), each populated after every turn:
 
 | Section | What's in it |
 |---|---|
@@ -355,11 +357,11 @@ Drop these into the chat to exercise different parts of the harness:
 | *"Give me the complete document for account 7 — customer, branch, cards, transactions. Use the duality view if there is one."* | `get_document("account_dv", "7")` (JSON Relational Duality) |
 | *"Show me all transactions flagged as STRUCTURING in EUROPE."* | `query_documents("account_dv", where=...)` + DDS (amounts masked unless EXECUTIVE) |
 | *"How do I diagnose ORA-00904? Consult any guide you have."* | `load_skill("agent/ora-error-catalog")` from the skillbox |
-| *"List the Suspicious Activity Reports filed this quarter."* | identity gates at the kernel: 0 rows as `agent`, 15 as `compliance.officer` |
+| *"List the Suspicious Activity Reports."* | identity gates at the kernel: 0 rows as `agent`, all 117 as `compliance.officer` |
 
 ## Notes
 
-- The agent runs as `AGENT_USER` with whatever grants you've given it. `tool_run_sql` is read-only. Identity is enforced by the database: `tool_run_sql` and the Data Explorer both call `AGENT.set_eda_ctx` before executing, so the `DBMS_RLS` policies installed by `scripts/setup_deep_security.py` scope every query. Set the persona in the header and the same SQL returns different rows — you never set `EDA_CTX.END_USER` yourself.
+- The agent runs as `AGENT_USER` with whatever grants you've given it. `tool_run_sql` is read-only (its session is opened READ ONLY, and a denylist rejects dynamic-SQL packages and `FOR UPDATE`). Identity is enforced by the database: `tool_run_sql` and the Data Explorer each take a private session from `identity_session` and call `AGENT.set_eda_ctx` on it before executing, so the `DBMS_RLS` policies installed by `scripts/setup_deep_security.py` scope every query. Set the persona in the header and the same SQL returns different rows — you never set `EDA_CTX.END_USER` yourself.
 - ⚠️ The VPD backend is **fail-open**: with no end-user context set, every policy predicate evaluates to `1=1` and all rows are visible. Deep Data Security (Enterprise-class 26ai) is **default-deny**. That gap is the honest caveat of this demo — see [`docs/part-8-deep-data-security.md`](../docs/part-8-deep-data-security.md).
 - The two JSON-relational duality views (`account_dv`, `customer_dv`) are read-only; the `get_document` and `query_documents` tools call them through `agent_conn` so the kernel-level row/column policies on the underlying tables apply transparently to the JSON output.
 - Spatial queries use SRID 8307 (WGS84). `branches.location` and `merchants.location` are both indexed (`MDSYS.SPATIAL_INDEX_V2`).

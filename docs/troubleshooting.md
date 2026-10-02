@@ -65,13 +65,13 @@ SQL
 docker ps
 ```
 
-If `oracle-free` isn't listed, start it (the §1 setup cell does this on first run):
+If `oracle-free` isn't listed, run the idempotent provisioner (it starts the container and waits until it is healthy):
 
 ```bash
-docker start oracle-free
+bash .devcontainer/provision.sh
 ```
 
-Wait 30 seconds and retry the connection cell.
+Then retry the connection cell.
 
 ---
 
@@ -79,15 +79,13 @@ Wait 30 seconds and retry the connection cell.
 
 **Symptom:** Connecting as `AGENT` fails with an authentication error.
 
-**Cause:** The §1 bootstrap cell didn't run — `AGENT` doesn't exist yet. Or the container was rebuilt with a stale volume.
+**Cause:** `AGENT` doesn't exist yet (provisioning did not finish), or the container was rebuilt with a stale volume.
 
-**Fix:** Re-run the bootstrap cell (it creates `AGENT` if missing). If the issue persists:
+**Fix:** Re-run provisioning (it creates `AGENT` if missing and resets the `SYS` password to the workshop default):
 
 ```bash
-docker exec oracle-free resetPassword OraclePwd_2025
+bash .devcontainer/provision.sh
 ```
-
-Then re-run the bootstrap cell.
 
 ---
 
@@ -183,7 +181,7 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 - *FINANCE tables / transactions / SAR reports* → the seed did not finish: `cd app && python scripts/bootstrap.py && python scripts/seed.py`.
 - *ONNX embedder missing* → `cd app && python scripts/bootstrap.py` (needs the `vector_memory_size` pool from the same script).
-- *credentials: 0 key(s)* → no OCI GenAI key was injected; add it as a Codespaces secret (then restart) or `echo 'OCI_GENAI_API_KEY=...' >> app/.env`.
+- *credentials: 0 key(s)* → no OCI GenAI key reached the kernel's environment; add it as a Codespaces secret (then restart), or re-run §1.1 and paste the key at its prompt. (`app/.env` feeds the app, not the notebook kernel.)
 - *Oracle Text index absent* → informational: `§3.3a` creates it before the keyword leg needs it.
 
 The cell hard-fails only on a seeded `FINANCE` and a present embedder, because every later block depends on those two.
@@ -224,7 +222,7 @@ with sys_conn.cursor() as cur:
     print("table count:", cur.fetchone()[0])
 ```
 
-Should print `7`. If `0`, re-run the seed cell.
+Should print `15` (the seed's tables; spatial-index helper tables and anything you create yourself add to it). If `0`, run `bash .devcontainer/provision.sh`.
 
 ---
 
@@ -242,7 +240,7 @@ with agent_conn.cursor() as cur:
     print(list(cur))
 ```
 
-Should include `ALL_MINILM_L12_V2`. If empty, the §1 ONNX load cell didn't run.
+Should include `ALL_MINILM_L12_V2`. If empty, the embedder was never loaded — run `bash .devcontainer/provision.sh` (or `cd app && python scripts/bootstrap.py`).
 
 For `kinds=`, try without a filter first to confirm there are memories at all:
 

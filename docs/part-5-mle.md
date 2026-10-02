@@ -10,7 +10,7 @@ Oracle AI Database 26ai Free ships MLE with JavaScript. Python MLE is a separate
 
 ## Why MLE rather than a subprocess sandbox?
 
-- **MLE is a *language* sandbox, not a *privilege* sandbox.** GraalVM polyglot blocks the things you'd expect — filesystem, network, native code, OS shell — but **JS-side code inherits the caller's database grants** via `mle-js-oracledb`. So the real trust boundary is `AGENT_USER`'s grants plus whatever the kernel enforces at SQL-execution time (VPD / audit / redaction). If you care about defense-in-depth, narrow `AGENT`'s grants.
+- **MLE is a *language* sandbox, not a *privilege* sandbox — except that `exec_js` removes the privilege.** GraalVM blocks filesystem, network, native code and the OS shell, and a bare MLE context would also hand the script `session` / `oracledb` (a live `AGENT` connection that can read tables `run_sql` refuses). The `exec_js` wrapper (`app/backend/agent/mle.py`) captures `mle-js-bindings` for itself, then deletes those globals and replaces `require` with one that always throws `module <name> is not available in exec_js`, so model-written JS gets no database access. Code run directly via `DBMS_MLE.EVAL` outside `exec_js` still inherits `AGENT`'s grants via `mle-js-oracledb` — narrow them if that matters.
 - **No exfiltration channel by construction.** The polyglot engine doesn't expose filesystem, network, or native libs, so agent-authored code can't open sockets or read `~/.ssh/`.
 - **Code runs next to the data.** Snippets that operate over rows the agent just retrieved don't round-trip those rows back out to a separate process.
 - **Zero local install.** GraalVM ships *inside* the database. No Python, Java, or GraalVM on the laptop running the harness.
@@ -33,7 +33,7 @@ This Part just defines the Python helper that calls `DBMS_MLE.EVAL` for us.
 {"stdout": "<captured console.log>", "stderr": "<error if thrown>", "ok": True/False}
 ```
 
-The wrapper uses `mle-js-bindings` to export a `result` value, which the Python side imports via `DBMS_MLE.IMPORT_FROM_MLE` and parses as JSON.
+The wrapper takes `require("mle-js-bindings")` before the model's code runs and uses it to export a `result` value, which the Python side imports via `DBMS_MLE.IMPORT_FROM_MLE` and parses as JSON. Inside the model's code `require` is blocked.
 
 ## Why the agent will actually reach for it
 
@@ -66,7 +66,7 @@ The model emits this JS in response to "compute percentiles over these order tot
 ## Key Takeaways — Part 5
 
 - **LLMs are unreliable at math.** Percentiles, weighted means, post-fetch reshaping — anything quantitative — should run in a deterministic engine, not in the model's head.
-- **MLE is a *language* sandbox, not a *privilege* sandbox.** GraalVM blocks I/O and arbitrary syscalls; same trust boundary as `run_sql`. No subprocess, no network, no extra install.
+- **MLE is a *language* sandbox, not a *privilege* sandbox.** GraalVM blocks I/O and arbitrary syscalls; `exec_js` additionally strips `session`/`oracledb` so it has no DB access. No subprocess, no network, no extra install.
 - **The audit trail is the actual computation.** Routing math through `exec_js` means the trace shows the JS source, the inputs, and the result — not a number the LLM claims is correct.
 
 ## Troubleshooting
@@ -75,6 +75,6 @@ The model emits this JS in response to "compute percentiles over these order tot
 
 **No `stdout` but `ok: true`** — The snippet didn't call `console.log`. Wrap your final value in `console.log(...)` to capture it.
 
-**`stderr: "ReferenceError: require is not defined"`** — The wrapper imports `require("mle-js-bindings")`. If you're running a snippet directly via `DBMS_MLE.EVAL` outside `exec_js`, you need to handle bindings yourself.
+**`stderr: "module <name> is not available in exec_js"`** — By design: `exec_js` blocks `require` for model code. Compute over the values you pass in; fetch data with `run_sql`. (Running a snippet directly via `DBMS_MLE.EVAL` outside `exec_js`, you handle bindings yourself.)
 
-**`ORA-04036: PGA memory ... exceeds PGA_AGGREGATE_LIMIT`** — Raise `pga_aggregate_limit`. The pre-built setup raises it to 4 GiB; if you're running outside the Codespace, do this once as `SYSDBA` against `CDB$ROOT`.
+**`ORA-04036: PGA memory ... exceeds PGA_AGGREGATE_LIMIT`** — Raise `pga_aggregate_limit`. The provisioning scripts do not change it (the Free default is 2 GiB); as `SYSDBA` against `CDB$ROOT`, set it to 4G — see [troubleshooting](troubleshooting.md).
