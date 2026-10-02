@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Send } from "lucide-react";
 
-export default function ChatInput({ onSend, disabled }) {
+export default function ChatInput({ onSend, disabled, busyElsewhere = false }) {
   const [value, setValue] = useState("");
 
   const submit = () => {
@@ -11,7 +11,8 @@ export default function ChatInput({ onSend, disabled }) {
   };
 
   const handleKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Enter confirms an IME composition (CJK input) — it must not send.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
     }
@@ -22,15 +23,23 @@ export default function ChatInput({ onSend, disabled }) {
       <div className="max-w-3xl mx-auto flex gap-2 items-end">
         <textarea
           rows={2}
+          aria-label="Message the agent"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKey}
-          placeholder={disabled ? "Agent is working…" : "Ask about your data… (Enter to send, Shift+Enter for newline)"}
+          placeholder={
+            busyElsewhere
+              ? "Agent is working in another thread…"
+              : disabled
+                ? "Agent is working…"
+                : "Ask about your data… (Enter to send, Shift+Enter for newline)"
+          }
           disabled={disabled}
           className="flex-1 bg-bg-elev border border-white/5 rounded px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-skill resize-none"
         />
         <button
           onClick={submit}
+          aria-label="Send message"
           disabled={disabled || !value.trim()}
           className="bg-accent-skill/80 hover:bg-accent-skill text-white px-3 py-2 rounded disabled:opacity-30"
         >

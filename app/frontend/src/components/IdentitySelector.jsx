@@ -41,6 +41,8 @@ export default function IdentitySelector({ identities, identityId, onChange }) {
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] hover:border-accent-oracle/40"
         title="Switch the active identity (persona). Affects data explorer + agent."
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
         <ShieldCheck size={12} className="text-accent-oracle" />
         <span className="text-text-muted">use as:</span>
@@ -49,11 +51,11 @@ export default function IdentitySelector({ identities, identityId, onChange }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1 w-[360px] z-50 bg-bg-elev border border-white/10 rounded shadow-2xl">
+        <div className="absolute right-0 mt-1 w-[360px] max-w-[92vw] max-h-[calc(100vh-4rem)] overflow-y-auto z-50 bg-bg-elev border border-white/10 rounded shadow-2xl">
           <div className="px-3 py-2 border-b border-white/5 text-[10px] uppercase tracking-wider text-text-muted">
             Acting identity
           </div>
-          <ul>
+          <ul role="listbox" aria-label="Acting identity">
             {identities.map((id) => {
               const isActive = id.id === identityId;
               const clearanceCls =
@@ -61,12 +63,22 @@ export default function IdentitySelector({ identities, identityId, onChange }) {
               return (
                 <li
                   key={id.id}
-                  className={`px-3 py-2 cursor-pointer border-b border-white/[0.03] last:border-0 ${
+                  role="option"
+                  aria-selected={isActive}
+                  tabIndex={0}
+                  className={`px-3 py-2 cursor-pointer border-b border-white/[0.03] last:border-0 focus:outline-none focus:bg-white/[0.07] ${
                     isActive ? "bg-white/[0.05]" : "hover:bg-white/[0.03]"
                   }`}
                   onClick={() => {
                     onChange(id.id);
                     setOpen(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onChange(id.id);
+                      setOpen(false);
+                    }
                   }}
                 >
                   <div className="flex items-center justify-between gap-2">

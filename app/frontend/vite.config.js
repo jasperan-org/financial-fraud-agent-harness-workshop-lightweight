@@ -10,6 +10,11 @@ import react from "@vitejs/plugin-react";
 //
 // HMR over the dev tunnel needs `clientPort: 443` so the browser-side
 // WebSocket targets the public HTTPS port instead of `ws://localhost:3000`.
+// Only Codespaces-style tunnels need that: forcing 443 on a plain local run
+// ("localhost:3000") makes the HMR socket fail on every page load and disables
+// hot reload, so it is applied only when CODESPACES is set.
+const IN_CODESPACES = !!(process.env.CODESPACES || process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN);
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -17,9 +22,7 @@ export default defineConfig({
     port: 3000,
     strictPort: true,
     allowedHosts: true,
-    hmr: {
-      clientPort: 443,
-    },
+    hmr: IN_CODESPACES ? { clientPort: 443 } : true,
     proxy: {
       "/api": "http://localhost:8000",
       "/socket.io": { target: "http://localhost:8000", ws: true },

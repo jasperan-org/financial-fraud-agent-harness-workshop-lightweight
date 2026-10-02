@@ -156,7 +156,7 @@ export default function Layout({ connected, chat, identity, socket, live }) {
             contextWindow={chat.contextWindow}
             tokenUsage={chat.tokenUsage}
             touched={chat.touched}
-            trace={chat.trace}
+            trace={chat.liveTrace}
             isThinking={chat.isThinking}
             live={live}
             identity={identity.identity}

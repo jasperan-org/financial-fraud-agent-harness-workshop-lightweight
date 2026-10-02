@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const AUTO_FOLLOW_KEY = "ffw.worldAutoFollow";
+const PENDING_MAX_MS = 15_000;
 
 /**
  * Listens for the agent's globe-driving events and exposes them as state.
@@ -59,6 +60,17 @@ export function useWorldFocus(socket) {
           pending: true,
           source: "explicit",
         });
+        // If the tool fails no `focus_world` event ever replaces this banner.
+        if (clearTimer.current) window.clearTimeout(clearTimer.current);
+        clearTimer.current = window.setTimeout(() => setAgentFocus(null), PENDING_MAX_MS);
+      }
+    };
+
+    // Resolved banners are replaced by the `focus_world` event; one still
+    // pending when its tool call ends means the call failed — drop it.
+    const onToolFinished = (p) => {
+      if (p && p.name === "focus_world") {
+        setAgentFocus((cur) => (cur && cur.pending ? null : cur));
       }
     };
 
@@ -74,9 +86,11 @@ export function useWorldFocus(socket) {
     };
 
     socket.on("tool_started", onToolStarted);
+    socket.on("tool_finished", onToolFinished);
     socket.on("focus_world", onFocus);
     return () => {
       socket.off("tool_started", onToolStarted);
+      socket.off("tool_finished", onToolFinished);
       socket.off("focus_world", onFocus);
       if (clearTimer.current) window.clearTimeout(clearTimer.current);
     };

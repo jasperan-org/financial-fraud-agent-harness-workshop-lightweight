@@ -112,7 +112,7 @@ const TAG_META = {
  *     authorization rules — flagged with a red "expected: denied" chip so the
  *     user learns where the boundary is.
  */
-export default function WelcomeMat({ identity, onStart }) {
+export default function WelcomeMat({ identity, onStart, disabled = false }) {
   if (!identity) return null;
   const starters = STARTERS[identity.id] || FALLBACK_STARTERS;
   const clearanceCls =
@@ -183,7 +183,7 @@ export default function WelcomeMat({ identity, onStart }) {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {starters.map((q) => (
-              <StarterButton key={q.text} q={q} onStart={onStart} />
+              <StarterButton key={q.text} q={q} onStart={onStart} disabled={disabled} />
             ))}
           </div>
           <p className="mt-3 text-[10px] text-text-muted">
@@ -202,7 +202,7 @@ export default function WelcomeMat({ identity, onStart }) {
   );
 }
 
-function StarterButton({ q, onStart }) {
+function StarterButton({ q, onStart, disabled }) {
   const meta = q.tag ? TAG_META[q.tag] : null;
   const Icon = meta?.icon;
   const borderCls = q.tag === "denied"
@@ -211,8 +211,9 @@ function StarterButton({ q, onStart }) {
   return (
     <button
       onClick={() => onStart(q.text)}
-      className={`text-left text-[12px] leading-snug px-3 py-2 rounded border bg-white/[0.02] hover:bg-white/[0.06] text-text-accent ${borderCls}`}
-      title={q.denyHint || undefined}
+      disabled={disabled}
+      className={`text-left text-[12px] leading-snug px-3 py-2 rounded border bg-white/[0.02] hover:bg-white/[0.06] text-text-accent disabled:opacity-40 disabled:cursor-not-allowed ${borderCls}`}
+      title={disabled ? "the agent is still working on another thread" : q.denyHint || undefined}
     >
       <div className="flex items-start justify-between gap-2">
         <span>{q.text}</span>

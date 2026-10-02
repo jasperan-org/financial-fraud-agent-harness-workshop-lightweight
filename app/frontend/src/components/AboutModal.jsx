@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X, Database, Cpu, Shield, Globe2 } from "lucide-react";
 
 /**
@@ -8,14 +8,26 @@ import { X, Database, Cpu, Shield, Globe2 } from "lucide-react";
  * the backdrop, or the Escape key.
  */
 export default function AboutModal({ open, onClose }) {
+  const closeRef = useRef(null);
+  // Header re-renders on every live transaction and hands us a fresh onClose;
+  // keep it out of the effect deps so focus is only moved on open/close.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
+    // Move focus into the dialog, and hand it back to the opener on close.
+    const opener = document.activeElement;
+    closeRef.current?.focus();
     const onKey = (e) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (opener instanceof HTMLElement) opener.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -25,6 +37,9 @@ export default function AboutModal({ open, onClose }) {
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="about-title"
         className="w-[min(720px,92vw)] max-h-[88vh] overflow-y-auto bg-bg-elev border border-white/10 rounded-lg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -33,7 +48,7 @@ export default function AboutModal({ open, onClose }) {
           <div className="flex items-center gap-2">
             <Database size={20} className="text-accent-oracle" />
             <div>
-              <h2 className="text-sm font-semibold tracking-wide">
+              <h2 id="about-title" className="text-sm font-semibold tracking-wide">
                 About Meridian Bank Data Agent
               </h2>
               <p className="text-[11px] text-text-muted">
@@ -42,9 +57,11 @@ export default function AboutModal({ open, onClose }) {
             </div>
           </div>
           <button
+            ref={closeRef}
             onClick={onClose}
             className="text-text-muted hover:text-text-primary p-1 rounded"
             title="close (esc)"
+            aria-label="Close"
           >
             <X size={16} />
           </button>
@@ -53,12 +70,12 @@ export default function AboutModal({ open, onClose }) {
         {/* Body */}
         <div className="px-5 py-4 space-y-4 text-[13px] leading-relaxed text-text-accent">
           <p>
-            This application is the runnable mirror of the{" "}
+            This application is the runnable mirror of the workshop notebook (
             <code className="px-1 py-0.5 rounded bg-white/5 text-accent-skill">
-              enterprise_data_agent.ipynb
-            </code>{" "}
-            notebook. The notebook walks through how to build an agent harness
-            from Oracle primitives; this app lets you exercise it in a browser
+              notebook_student.ipynb
+            </code>
+            ). The notebook walks through how to build an agent harness from
+            Oracle primitives; this app lets you exercise it in a browser
             against a live database.
           </p>
 
@@ -68,12 +85,12 @@ export default function AboutModal({ open, onClose }) {
             </div>
             <ul className="list-disc pl-5 space-y-1">
               <li>
-                A Flask + Socket.IO backend wrapping the §11 agent loop —
+                A Flask + Socket.IO backend wrapping the Part 7 agent loop —
                 tool retrieval, OAMP memory, MLE-sandboxed JS, the full skillbox.
               </li>
               <li>
                 Oracle AI Database 26ai with{" "}
-                <code className="text-accent-vector">VECTOR</code> columns,
+                <code className="text-accent-skill">VECTOR</code> columns,
                 HNSW indexes, in-database ONNX embedder + reranker, JSON
                 Relational Duality Views, and a DBFS scratchpad.
               </li>
@@ -96,7 +113,7 @@ export default function AboutModal({ open, onClose }) {
               redacted by clearance) and inside the agent loop, where the
               persona is stamped into the system prompt so the model can
               explain authorization-driven empty results. This mirrors the
-              Deep Data Security (DDS) pattern in Part 8 of the notebook.
+              Deep Data Security (DDS) pattern in the Part 8 guide (docs/part-8-deep-data-security.md).
             </p>
           </section>
 

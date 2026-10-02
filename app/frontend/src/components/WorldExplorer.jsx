@@ -309,7 +309,11 @@ export default function WorldExplorer({
   const livePoints = useMemo(() => [...livePointsRef.current.values()], [liveVersion]);
   const liveRings = useMemo(() => [...liveRingsRef.current.values()], [liveVersion, arcTick]);
 
+  // Persona switches can overlap; a slow response for the previous identity
+  // must never replace the current identity's (possibly stricter) world.
+  const worldReq = useRef(0);
   const fetchWorld = () => {
+    const req = ++worldReq.current;
     setLoading(true);
     setError(null);
     fetch(`/api/world?as_user=${encodeURIComponent(identityId || "agent")}`)
@@ -331,14 +335,19 @@ export default function WorldExplorer({
         }
       })
       .then((d) => {
+        if (req !== worldReq.current) return;
         if (d && d.error) {
           setError(d.error);
           return;
         }
         setData(d);
       })
-      .catch((e) => setError(String(e?.message || e)))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (req === worldReq.current) setError(String(e?.message || e));
+      })
+      .finally(() => {
+        if (req === worldReq.current) setLoading(false);
+      });
   };
 
   // Fetch on mount and whenever the acting identity changes.
@@ -572,9 +581,9 @@ export default function WorldExplorer({
 
   const arcLabelOf = useCallback((d) =>
     `<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#f5f5f5;background:#0a0a0acc;padding:6px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:4px">
-               <strong>txn ${d.id}</strong> · ${d.status}<br/>
-               ${d.branch} → ${d.merchant}<br/>
-               <span style="color:#888">${d.flag_reason || "AML"} · ${d.region}</span>
+               <strong>txn ${_txt(d.id)}</strong> · ${_txt(d.status)}<br/>
+               ${_txt(d.branch)} → ${_txt(d.merchant)}<br/>
+               <span style="color:#888">${_txt(d.flag_reason, "AML")} · ${_txt(d.region)}</span>
              </div>`, []);
 
   // Birth ping: white, fast, gone in ~3 s; the search anchor keeps its steady
@@ -670,7 +679,7 @@ export default function WorldExplorer({
             ) : (
               <span className="text-accent-memory">
                 → {searchResult.kind}: {searchResult.name || searchResult.description || searchResult.id}{" "}
-                ({searchResult.lat.toFixed(2)}, {searchResult.lng.toFixed(2)})
+                ({_fix(searchResult.lat, 2)}, {_fix(searchResult.lng, 2)})
               </span>
             )}
           </div>
@@ -881,8 +890,12 @@ const _fix = (v, digits = 1, fallback = "—") => {
   const n = typeof v === "number" ? v : (v != null ? Number(v) : NaN);
   return Number.isFinite(n) ? n.toFixed(digits) : fallback;
 };
+// Tooltip strings are rendered as HTML by three-globe; DB values (merchant and
+// customer names) must be escaped.
+const _esc = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const _txt = (v, fallback = "—") =>
-  v == null || v === "" ? fallback : String(v);
+  v == null || v === "" ? fallback : _esc(v);
 
 const _usd = (cents) => {
   if (cents == null || !Number.isFinite(Number(cents))) return "—";

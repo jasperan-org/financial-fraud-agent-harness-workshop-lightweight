@@ -16,7 +16,7 @@ export default function ChatPane({ chat, identity }) {
     <main className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5">
         {chat.messages.length === 0 && !chat.isThinking && (
-          <WelcomeMat identity={identity} onStart={chat.sendMessage} />
+          <WelcomeMat identity={identity} onStart={chat.sendMessage} disabled={chat.busy} />
         )}
 
         <div className="max-w-3xl mx-auto space-y-3">
@@ -35,7 +35,7 @@ export default function ChatPane({ chat, identity }) {
         </div>
       </div>
 
-      <ChatInput onSend={chat.sendMessage} disabled={chat.isThinking} />
+      <ChatInput onSend={chat.sendMessage} disabled={chat.busy} busyElsewhere={chat.busy && !chat.isThinking} />
     </main>
   );
 }

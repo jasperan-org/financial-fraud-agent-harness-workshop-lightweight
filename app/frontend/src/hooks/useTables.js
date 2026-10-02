@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useTables(identityId) {
   const [tables, setTables] = useState([]);
@@ -10,21 +10,31 @@ export function useTables(identityId) {
 
   const asUserParam = `as_user=${encodeURIComponent(identityId || "agent")}`;
 
+  // Row requests can resolve out of order (fast tab clicks, one request per
+  // keystroke in the filter box); only the newest one may touch state.
+  const rowsReq = useRef(0);
+
   const fetchTableList = useCallback(() => {
     fetch(`/api/data/tables?${asUserParam}`)
       .then((r) => r.json())
       .then((d) => {
-        setTables(d.tables || []);
-        if (!active && d.tables && d.tables.length > 0) {
-          setActive(d.tables[0]);
-        }
+        const list = d.tables || [];
+        setTables(list);
+        // Keep the current selection (same object, so the rows effect does not
+        // re-fire); fall back to the first table when there is none.
+        setActive((cur) =>
+          cur && list.some((t) => t.schema === cur.schema && t.name === cur.name)
+            ? cur
+            : list[0] || null,
+        );
       })
       .catch((e) => setError(String(e)));
-  }, [active, asUserParam]);
+  }, [asUserParam]);
 
   const fetchRows = useCallback(
     (table, q = "") => {
       if (!table) return;
+      const req = ++rowsReq.current;
       setLoading(true);
       setError(null);
       const url = `/api/data/tables/${table.schema}/${table.name}/rows`
@@ -33,6 +43,7 @@ export function useTables(identityId) {
       fetch(url)
         .then((r) => r.json())
         .then((d) => {
+          if (req !== rowsReq.current) return;
           if (d.error) {
             setError(d.error);
             setData(null);
@@ -40,8 +51,12 @@ export function useTables(identityId) {
             setData(d);
           }
         })
-        .catch((e) => setError(String(e)))
-        .finally(() => setLoading(false));
+        .catch((e) => {
+          if (req === rowsReq.current) setError(String(e));
+        })
+        .finally(() => {
+          if (req === rowsReq.current) setLoading(false);
+        });
     },
     [asUserParam]
   );
@@ -50,9 +65,12 @@ export function useTables(identityId) {
     fetchTableList();
   }, [fetchTableList]);
 
-  // When identity changes, refetch the rows so masks/filters apply.
+  // When the table or identity changes, drop the row filter (a term typed for
+  // one table rarely fits another, and it would silently hide every row) and
+  // refetch so masks/filters apply.
   useEffect(() => {
-    if (active) fetchRows(active, search);
+    setSearch("");
+    if (active) fetchRows(active, "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, identityId]);
 
@@ -74,7 +92,7 @@ export function useTables(identityId) {
     (schema) => {
       if (!schema) return;
       setScanState({ status: "running", summary: null, error: null });
-      fetch(`/api/data/scan/${schema}`, { method: "POST" })
+      fetch(`/api/data/scan/${encodeURIComponent(schema)}`, { method: "POST" })
         .then((r) => r.json())
         .then((d) => {
           if (d.error) {

@@ -23,6 +23,9 @@ export default function HistoryDrawer({
           open ? "translate-x-0" : "-translate-x-full"
         }`}
         aria-hidden={!open}
+        // Off-screen but still in the DOM: `inert` keeps its buttons out of the
+        // tab order and the accessibility tree while closed.
+        inert={open ? undefined : ""}
       >
         <div className="h-full bg-bg-panel border-r border-white/10 flex flex-col shadow-[8px_0_40px_-12px_rgba(0,0,0,0.7)]">
           <div className="h-11 shrink-0 flex items-center gap-2 px-3 border-b border-white/5">
@@ -38,6 +41,7 @@ export default function HistoryDrawer({
               onClick={onClose}
               className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-white/5"
               title="close"
+              aria-label="Close conversations"
             >
               <X size={13} />
             </button>

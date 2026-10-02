@@ -38,6 +38,7 @@ export default function Header({
           {live && (
             <button
               onClick={() => live.setFeed(!live.enabled)}
+              aria-pressed={live.enabled}
               title={
                 live.enabled
                   ? "live data feed on — new transactions stream in; click to pause"
