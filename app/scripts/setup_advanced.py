@@ -64,6 +64,22 @@ def ensure_dds_policies(sys_conn, agent_conn, demo_user="FINANCE", agent_user="A
     Falls back to DBMS_RLS when the declarative DDS DDL isn't on this image."""
     import oracledb
 
+    # setup_deep_security.py owns the identity rules once it has run (EDA_*
+    # policies, the full persona rule tables, its own setter). Re-running this
+    # older, narrower installer on top would DELETE and reseed the rule tables
+    # without the `agent` persona (so `agent` would see no transactions) and
+    # stack two legacy policies on FINANCE.TRANSACTIONS.
+    with agent_conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM all_policies "
+            " WHERE object_owner = :o AND policy_name LIKE 'EDA\\_%' ESCAPE '\\'",
+            o=demo_user.upper(),
+        )
+        if cur.fetchone()[0]:
+            print("  [dds] identity rules already installed by setup_deep_security.py "
+                  "— leaving them untouched")
+            return
+
     # --- Authorization + clearance tables in AGENT schema ---
     DDS_DDL = [
         ("agent_authorizations", (

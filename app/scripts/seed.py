@@ -8,7 +8,9 @@ vector memory pool, ONNX embedder, DBFS, empty toolbox/skillbox). This script:
   - Scans the schema into OAMP institutional knowledge
   - Ingests oracle/skills into the skillbox
 
-Idempotent. Re-runnable to refresh the data.
+Re-running RESETS the FINANCE data: seed_finance drops and recreates every bank
+table, which also drops the DBMS_RLS identity policies on them and any live-feed
+rows. Run `python scripts/setup_deep_security.py` afterwards (provision.sh does).
 
 Run:
     cd app && python scripts/seed.py
@@ -36,7 +38,7 @@ def main():
     with sys_conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM all_users WHERE username = :u", u=SCHEMA)
         if cur.fetchone()[0] == 0:
-            cur.execute(f"CREATE USER {SCHEMA} IDENTIFIED BY {PASS}")
+            cur.execute(f'CREATE USER {SCHEMA} IDENTIFIED BY "{PASS}"')
         cur.execute(f"GRANT CONNECT, RESOURCE, UNLIMITED TABLESPACE TO {SCHEMA}")
         cur.execute(f"GRANT CREATE VIEW, CREATE PROCEDURE, CREATE TYPE TO {SCHEMA}")
         try:
@@ -70,7 +72,7 @@ def main():
     print("\nBuilding OAMP memory client + scanning schema...")
     from memory.manager import build_memory_client
     from retrieval.scanner import run_scan
-    mc = build_memory_client(agent_conn)
+    mc = build_memory_client()
     summary = run_scan(agent_conn, mc, SCHEMA)
     print(f"  scan summary: {summary}")
 

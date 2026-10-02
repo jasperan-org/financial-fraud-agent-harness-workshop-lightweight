@@ -24,7 +24,7 @@ from api.identities import (
     region_filter_clause,
 )
 from config import AGENT_USER, DEMO_USER
-from db.deep_security import set_identity as set_db_identity
+from db.deep_security import identity_session
 
 
 data_bp = Blueprint("data", __name__)
@@ -146,7 +146,10 @@ def list_tables():
         out.append({"schema": "DBFS", "name": "scratchpad",
                     "row_count": None, "forbidden": False})
 
-    with conn.cursor() as cur:
+    # Counts as the persona sees them (kernel policies), on a private session —
+    # not whatever persona the shared connection last had.
+    with identity_session(identity, read_only=True) as ident_conn, \
+            ident_conn.cursor() as cur:
         for schema, tables in TABLE_ALLOWLIST.items():
             for table in tables:
                 qualified = f"{schema}.{table}"
@@ -210,8 +213,11 @@ def get_rows(schema: str, table: str):
                 "identity": identity.as_json(),
             }), 403
 
-        limit = min(int(request.args.get("limit", "100")), 500)
-        offset = max(int(request.args.get("offset", "0")), 0)
+        try:
+            limit = max(1, min(int(request.args.get("limit", "100")), 500))
+            offset = max(int(request.args.get("offset", "0")), 0)
+        except ValueError:
+            return jsonify({"error": "limit and offset must be integers"}), 400
         search = (request.args.get("search") or "").strip()
 
         # Schema introspection.
@@ -288,34 +294,30 @@ def get_rows(schema: str, table: str):
         sql = (f"SELECT {col_list} FROM {qualified}{where_sql} "
                "ORDER BY 1 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY")
 
-        # Push the persona into the database session *before* the reads. The
+        # Push the persona into a database session *before* the reads. The
         # kernel then applies the same rules the post-filters below apply, which
         # is what makes this a trust boundary rather than a UI convenience.
-        # No-op when only the Python layer is installed.
-        try:
-            set_db_identity(conn, identity)
-        except Exception as exc:
-            traceback.print_exc()
-            print(f"[data] DB end-user context not set ({exc}); "
-                  "falling back to application-layer filtering only")
-
+        # The session is private and READ ONLY: the shared app connection would
+        # let concurrent requests overwrite each other's persona. If the persona
+        # cannot be pushed (Python-only layer installed) it logs and carries on.
         rows: list[list[Any]] = []
-        with conn.cursor() as cur:
-            # The COUNT query doesn't use OFFSET/LIMIT; pass everything else.
-            count_binds = {k: v for k, v in binds.items()
-                           if k != "limit" and k != "offset"}
-            cur.execute(count_sql, count_binds)
-            total = cur.fetchone()[0]
+        with identity_session(identity, read_only=True) as ident_conn:
+            with ident_conn.cursor() as cur:
+                # The COUNT query doesn't use OFFSET/LIMIT; pass everything else.
+                count_binds = {k: v for k, v in binds.items()
+                               if k != "limit" and k != "offset"}
+                cur.execute(count_sql, count_binds)
+                total = cur.fetchone()[0]
 
-            cur.execute(sql, binds)
-            mask_idx = {i: c for i, c in enumerate(rendered_cols) if c.get("masked")}
-            for row in cur:
-                rendered = [_render_value(v) for v in row]
-                # Apply identity-driven column masks after fetch — the kernel
-                # returns the values, we drop them before they leave the API.
-                for j in mask_idx:
-                    rendered[j] = "[REDACTED]"
-                rows.append(rendered)
+                cur.execute(sql, binds)
+                mask_idx = {i: c for i, c in enumerate(rendered_cols) if c.get("masked")}
+                for row in cur:
+                    rendered = [_render_value(v) for v in row]
+                    # Apply identity-driven column masks after fetch — the kernel
+                    # returns the values, we drop them before they leave the API.
+                    for j in mask_idx:
+                        rendered[j] = "[REDACTED]"
+                    rows.append(rendered)
 
         return jsonify({
             "schema": schema.upper(),

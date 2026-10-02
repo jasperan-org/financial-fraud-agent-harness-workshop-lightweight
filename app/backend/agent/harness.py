@@ -180,11 +180,11 @@ def agent_turn(
     trace: list[dict[str, Any]] = []
 
     thread = get_or_create_thread(memory_client, thread_id)
-    # OAMP runs memory extraction + context-summary refresh synchronously
-    # inside add_messages when extract_memories=True. If the configured
-    # extraction LLM rejects the request (bad key, wrong endpoint, etc.),
-    # the failure should NOT take down the chat — log it and continue with
-    # a degraded thread that just doesn't auto-extract.
+    # OAMP appends the message here and hands memory extraction + the
+    # context-summary refresh to its own background worker (see the lock note
+    # in memory/manager.py). If the extraction LLM rejects the request (bad
+    # key, wrong endpoint, etc.) that must NOT take down the chat — log it and
+    # continue with a degraded thread that just doesn't auto-extract.
     try:
         thread.add_messages([{"role": "user", "content": user_query}])
     except Exception as _oamp_err:

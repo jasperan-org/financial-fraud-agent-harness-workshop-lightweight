@@ -26,3 +26,13 @@ def connect_agent():
 
 def connect_demo():
     return connect(DEMO_USER, DEMO_PASS, SYS_DSN)
+
+
+def create_agent_pool(min: int = 1, max: int = 4):
+    """A thin-mode AGENT connection pool. OAMP gets one so its background
+    extraction worker (its own thread) never shares a session with the
+    foreground calls."""
+    return oracledb.create_pool(
+        user=AGENT_USER, password=AGENT_PASS, dsn=SYS_DSN,
+        min=min, max=max, increment=1,
+    )

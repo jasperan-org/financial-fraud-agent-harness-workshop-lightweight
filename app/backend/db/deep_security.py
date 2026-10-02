@@ -51,9 +51,11 @@ seeds: ``<persona id>@meridianbank.example``.
 
 from __future__ import annotations
 
+import contextlib
+import threading
 import re
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
 
 # Persona ids map to end-user names the same way `agent_authorizations` is
 # already seeded, so the DB layer and the UI dropdown agree on one identity.
@@ -837,6 +839,114 @@ def clear_identity(conn) -> None:
             cur.execute("BEGIN AGENT.SET_EDA_CTX(NULL, 'EXECUTIVE'); END;")
     except Exception:
         pass
+
+
+# --------------------------------------------------------------------------- #
+# Per-request database sessions
+# --------------------------------------------------------------------------- #
+#
+# `EDA_CTX` lives in the *database session*. The app's single shared AGENT
+# connection (the scanner, the AML desk, the world globe ...) is used by many
+# threads at once, so setting a persona on it is a race: request A sets
+# `agent`, request B sets `cfo`, and A's SELECT then runs as `cfo` (reproduced:
+# under 24 concurrent requests ~75% of `cfo` row counts came back with
+# `analyst.east`'s view). It also left the last persona behind for every
+# non-identity reader. So identity-scoped reads never touch the shared
+# connection: each borrows a pooled session, sets the persona, reads, and the
+# session is reset before it goes back to the pool.
+
+_POOL_SIZE = 8
+
+
+# A hand-rolled pool: plain `connect_agent()` connections are what the rest of
+# the app already runs on, and a semaphore bounds the sessions while idle ones
+# are reused. The app serves requests on real OS threads, so the idle list is
+# guarded by a lock (check-then-pop would race otherwise).
+_SLOTS = threading.BoundedSemaphore(_POOL_SIZE)
+_IDLE: list = []
+_IDLE_LOCK = threading.Lock()
+
+
+def _acquire_session():
+    if not _SLOTS.acquire(timeout=30):
+        raise RuntimeError(
+            f"no database session available after 30s (pool of {_POOL_SIZE} exhausted)"
+        )
+    try:
+        while True:
+            with _IDLE_LOCK:
+                conn = _IDLE.pop() if _IDLE else None
+            if conn is None:
+                break
+            try:
+                conn.ping()
+                return conn
+            except Exception:
+                _close_quietly(conn)
+        from db.connection import connect_agent
+        return connect_agent()
+    except BaseException:
+        _SLOTS.release()
+        raise
+
+
+def _release_session(conn, *, reusable: bool) -> None:
+    try:
+        if reusable:
+            with _IDLE_LOCK:
+                _IDLE.append(conn)
+        else:
+            _close_quietly(conn)
+    finally:
+        _SLOTS.release()
+
+
+def _close_quietly(conn) -> None:
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+@contextlib.contextmanager
+def identity_session(identity, *, read_only: bool = False) -> Iterator[Any]:
+    """Yield a dedicated AGENT connection with `identity` pushed into it.
+
+    `read_only=True` opens a READ ONLY transaction first, so the database itself
+    refuses DML and `SELECT ... FOR UPDATE` (ORA-01456) instead of trusting a
+    regex. On exit the transaction is rolled back and the end-user context is
+    cleared; a session that cannot be proven clean is dropped, never reused.
+
+    If the persona cannot be pushed (e.g. Deep Sec without an IAM token) the
+    error is logged and the read proceeds with the Python post-filters only —
+    the same fail-open caveat the README documents for the VPD backend.
+    """
+    conn = _acquire_session()
+    pushed = False
+    try:
+        if read_only:
+            with conn.cursor() as cur:
+                cur.execute("SET TRANSACTION READ ONLY")
+        if identity is not None:
+            try:
+                pushed = set_identity(conn, identity) == VPD
+            except Exception as e:
+                print(f"[deep_security] DB end-user context not set ({e}); "
+                      "relying on application-layer filtering only")
+        yield conn
+    finally:
+        reusable = False
+        try:
+            conn.rollback()
+            if pushed:
+                with conn.cursor() as cur:
+                    cur.execute("BEGIN AGENT.SET_EDA_CTX(NULL, 'EXECUTIVE'); END;")
+            reusable = True
+        except Exception as e:
+            print(f"[deep_security] session reset failed ({type(e).__name__}: {e}); "
+                  "dropping the pooled connection")
+        finally:
+            _release_session(conn, reusable=reusable)
 
 
 def visible_rows(conn, table: str = "FINANCE.TRANSACTIONS") -> int:

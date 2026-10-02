@@ -28,12 +28,19 @@ class DBFS:
 
         The third form was tripping ORA-64001 because we used to blindly
         prepend the mount and end up at /scratch/scratch/foo.sql.
+
+        `.` and empty segments are dropped and `..` is refused: the store keeps
+        `..` as a literal directory name, so '/threads/a/../b/x' used to be
+        written under a folder called '..' (and shown that way in the explorer)
+        instead of being rejected or resolved.
         """
-        if not path.startswith("/"):
-            path = "/" + path
+        segments = [s for s in path.split("/") if s and s != "."]
+        if ".." in segments:
+            raise ValueError(f"'..' is not allowed in scratch paths: {path!r}")
+        path = "/" + "/".join(segments)
         if path == self.mount or path.startswith(self.mount + "/"):
             return path
-        return f"{self.mount}{path}"
+        return f"{self.mount}{path}" if segments else self.mount
 
     def _ensure_dir(self, full_path: str) -> None:
         """Create the directory at `full_path` (and every parent inside the

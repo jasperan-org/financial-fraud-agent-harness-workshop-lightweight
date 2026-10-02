@@ -217,7 +217,10 @@ def chat_with_retry(client: LlmRouter, messages: list, tools: list | None = None
             raise
         except Exception as e:
             msg = str(e).lower()
-            if attempt < max_retries - 1 and ("429" in msg or "rate" in msg):
+            if attempt < max_retries - 1 and (
+                "429" in msg or "rate limit" in msg or "rate-limit" in msg
+                or "too many requests" in msg
+            ):
                 time.sleep(delay)
                 delay *= 2
                 continue

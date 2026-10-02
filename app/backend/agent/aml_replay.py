@@ -30,6 +30,7 @@ capture and is never touched.
 from __future__ import annotations
 
 import os
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -138,6 +139,11 @@ QUEUE_FETCH = 40            # rows the generic pass pulls before the merge
 # (customer_id, typology) -> the captured run that alert replays.
 CAPTURED = {(run["customer_id"], run["typology"]): run for run in aml_capture.RUNS}
 
+# Real OS threads (Socket.IO threading mode): socket handlers and the sweep task
+# run concurrently, so claims on `running`/`recalling` and swaps of the
+# connection are check-then-act sequences that `_LOCK` makes atomic.
+_LOCK = threading.Lock()
+
 _state: dict = {
     "socketio": None,
     "conn": None,
@@ -153,26 +159,29 @@ _state: dict = {
 # --------------------------------------------------------------------------- #
 
 def _conn():
-    c = _state.get("conn")
-    if c is None:
-        c = connect_agent()
-        _state["conn"] = c
-        _state["owns_conn"] = True
-    return c
+    with _LOCK:
+        c = _state.get("conn")
+        if c is None:
+            c = connect_agent()
+            _state["conn"] = c
+            _state["owns_conn"] = True
+        return c
 
 
 def _reset_conn() -> None:
     """Forget our connection so the next call dials a fresh one. On boot the
     connection is the app's, shared with the chat path — we never close that one
     out from under it; we only close a connection this module opened itself."""
-    c = _state.get("conn")
-    if c is not None and _state.get("owns_conn"):
+    with _LOCK:
+        c = _state.get("conn")
+        owned = _state.get("owns_conn")
+        _state["conn"] = None
+        _state["owns_conn"] = False
+    if c is not None and owned:
         try:
             c.close()
         except Exception:
             pass
-    _state["conn"] = None
-    _state["owns_conn"] = False
 
 
 def _rows(sql: str, **binds) -> list[dict]:
@@ -628,9 +637,9 @@ def _recall() -> None:
     capture = aml_capture.RECALL
     run_id = f"recall-{uuid.uuid4().hex[:8]}"
     _state["recalling"] = True
-    _emit("aml_recall_started", {"run_id": run_id, "seconds": capture["seconds"],
-                                 "tokens": capture["tokens"]})
     try:
+        _emit("aml_recall_started", {"run_id": run_id, "seconds": capture["seconds"],
+                                     "tokens": capture["tokens"]})
         for step in capture["steps"]:
             _sleep_ms(step["duration_ms"])
     finally:
@@ -696,12 +705,15 @@ def init_aml_replay(*, socketio, agent_conn) -> None:
 
     @socketio.on("aml_sweep_run")
     def _on_sweep_run(data):
-        if _state["running"]:
+        limit = _clamp_limit((data or {}).get("limit"))
+        with _LOCK:
+            claimed = not _state["running"]
+            if claimed:
+                _state["running"] = True
+        if not claimed:
             socketio.emit("error", {"message": "An AML sweep is already running."},
                           room=flask_request.sid)
             return
-        limit = _clamp_limit((data or {}).get("limit"))
-        _state["running"] = True
         socketio.emit("aml_status", status_payload())
         try:
             socketio.start_background_task(_sweep, limit)
@@ -717,9 +729,17 @@ def init_aml_replay(*, socketio, agent_conn) -> None:
 
     @socketio.on("aml_recall_run")
     def _on_recall_run(_data=None):
-        if _state["recalling"]:
-            return
-        socketio.start_background_task(_recall)
+        # Claim it here, not inside the task: two quick clicks would otherwise
+        # both pass this check before either task ran and replay twice.
+        with _LOCK:
+            if _state["recalling"]:
+                return
+            _state["recalling"] = True
+        try:
+            socketio.start_background_task(_recall)
+        except Exception:
+            _state["recalling"] = False
+            raise
 
     print(f"  AML replay: {len(aml_capture.RUNS)} captured run(s) · speed x{SPEED:g} · "
           f"ledger {LEDGER_TABLE.lower()} ready")

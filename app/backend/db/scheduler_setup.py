@@ -118,9 +118,10 @@ def ensure_scheduler(agent_conn, interval_min: int, owner: str) -> dict:
 
 
 def drain_queued_scans(agent_conn, memory_client, *, verbose: bool = False) -> int:
-    """Process every 'queued-by-scheduler' row in scan_history. For each
-    queued row, run the §5 scanner against the named owner and update the
-    row's notes/finished_at. Returns the number of scans run.
+    """Process every 'queued-by-scheduler' row in scan_history. Rows are
+    coalesced per owner: the scheduler queues a row every interval whether or
+    not anyone drained the last one, so a backlog of N rows for one schema is
+    ONE scan, and all N rows are closed by it. Returns the number of scans run.
 
     Safe to call from app startup or from a periodic foreground sweep — if
     nothing is queued, it's a single SELECT.
@@ -147,24 +148,30 @@ def drain_queued_scans(agent_conn, memory_client, *, verbose: bool = False) -> i
         traceback.print_exc()
         return 0
 
-    ran = 0
+    by_owner: dict[str, list[str]] = {}
     for scan_id, owner in queued:
+        by_owner.setdefault(owner, []).append(scan_id)
+
+    ran = 0
+    for owner, scan_ids in by_owner.items():
         try:
             summary = run_scan(agent_conn, memory_client, owner)
+            notes = (f"drained: new={summary.get('new', 0)} "
+                     f"updated={summary.get('updated', 0)} "
+                     f"skipped={summary.get('skipped', 0)}"
+                     + (f" (coalesced {len(scan_ids)} queued requests)"
+                        if len(scan_ids) > 1 else ""))[:4000]
             with agent_conn.cursor() as cur:
-                cur.execute(
+                cur.executemany(
                     "UPDATE scan_history "
                     "   SET objects_scanned = :n, "
                     "       facts_written = :w, "
                     "       finished_at = CURRENT_TIMESTAMP, "
                     "       notes = :notes "
                     " WHERE scan_id = :id",
-                    n=summary.get("facts_total", 0),
-                    w=summary.get("new", 0) + summary.get("updated", 0),
-                    notes=(f"drained: new={summary.get('new', 0)} "
-                           f"updated={summary.get('updated', 0)} "
-                           f"skipped={summary.get('skipped', 0)}")[:4000],
-                    id=scan_id,
+                    [{"n": summary.get("facts_total", 0),
+                      "w": summary.get("new", 0) + summary.get("updated", 0),
+                      "notes": notes, "id": sid} for sid in scan_ids],
                 )
             agent_conn.commit()
             ran += 1
@@ -173,3 +180,32 @@ def drain_queued_scans(agent_conn, memory_client, *, verbose: bool = False) -> i
         except Exception as e:
             print(f"[drain] {owner} failed: {type(e).__name__}: {e}")
     return ran
+
+
+def start_drain_loop(socketio, memory_client, every_s: int = 60) -> None:
+    """Drain the scheduler's queue for as long as the app runs. Without this the
+    DBMS_SCHEDULER job (setup_advanced.py creates one regardless of
+    SCAN_INTERVAL_MIN) only ever enqueued rows — nothing consumed them after
+    boot. Uses its own AGENT connection: the shared one is used by many
+    threads and the drain's commit would commit their in-flight work."""
+    def _loop():
+        from db.connection import connect_agent
+        conn = None
+        while True:
+            socketio.sleep(every_s)
+            try:
+                if conn is None:
+                    conn = connect_agent()
+                ran = drain_queued_scans(conn, memory_client)
+                if ran:
+                    print(f"[drain] ran {ran} queued scan(s)")
+            except Exception as e:
+                print(f"[drain] loop error: {type(e).__name__}: {e}")
+                try:
+                    if conn is not None:
+                        conn.close()
+                except Exception:
+                    pass
+                conn = None
+
+    socketio.start_background_task(_loop)

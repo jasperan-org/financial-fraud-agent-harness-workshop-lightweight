@@ -48,12 +48,12 @@ def ensure_agent_user(sys_conn, agent_user: str, agent_pass: str):
         )
         exists = cur.fetchone()[0] > 0
         if not exists:
-            cur.execute(f"CREATE USER {agent_user} IDENTIFIED BY {agent_pass}")
+            cur.execute(f'CREATE USER {agent_user} IDENTIFIED BY "{agent_pass}"')
             print(f"  created user {agent_user}")
         else:
             print(f"  user {agent_user} already exists")
             try:
-                cur.execute(f"ALTER USER {agent_user} IDENTIFIED BY {agent_pass} ACCOUNT UNLOCK")
+                cur.execute(f'ALTER USER {agent_user} IDENTIFIED BY "{agent_pass}" ACCOUNT UNLOCK')
                 print("  credentials converged to the workshop default (account unlocked)")
             except oracledb.DatabaseError as e:
                 print(f"  could not converge credentials: {e}")

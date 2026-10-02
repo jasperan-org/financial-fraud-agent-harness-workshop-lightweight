@@ -289,8 +289,36 @@ def column_is_masked(identity: Identity, schema: str, table: str, column: str) -
 
 import re
 
+from config import AGENT_USER
 
-_OWNER_OBJECT_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z][A-Za-z0-9_]*)\b")
+
+_OWNER_OBJECT_RE = re.compile(
+    r"(?<![\w$#])([A-Za-z][A-Za-z0-9_$#]*)\s*\.\s*([A-Za-z][A-Za-z0-9_$#]*)(?![\w$#])"
+)
+
+# One left-to-right pass so a comment marker inside a string literal is not
+# mistaken for a comment (and vice versa): literals are kept (a dynamic
+# `'SELECT ... FROM finance.sar_reports'` still counts as a reference),
+# "quoted identifiers" lose their quotes, comments become a space.
+_SQL_LEXEME_RE = re.compile(
+    r"""[nN]?[qQ]'(?:\[.*?\]|\{.*?\}|\(.*?\)|<.*?>|([^\s\w\[\{(<]).*?\1)'"""
+    r"""|'(?:[^']|'')*'|"([^"]*)"|/\*.*?\*/|--[^\n]*""",
+    re.S,
+)
+
+
+def normalize_sql(sql: str) -> str:
+    """Strip comments and identifier quotes so `"FINANCE"."SAR_REPORTS"`,
+    `FINANCE . SAR_REPORTS` and `FINANCE/**/.SAR_REPORTS` all read as
+    `FINANCE.SAR_REPORTS` to the table checks below."""
+    def repl(m: "re.Match[str]") -> str:
+        text = m.group(0)
+        if m.group(2) is not None:
+            return m.group(2)
+        if text.startswith(("/*", "--")):
+            return " "
+        return text
+    return _SQL_LEXEME_RE.sub(repl, sql)
 
 
 def referenced_tables(sql: str) -> set[str]:
@@ -302,7 +330,7 @@ def referenced_tables(sql: str) -> set[str]:
     deliberately conservative, refusing rather than risking a leak.
     """
     out: set[str] = set()
-    for owner, obj in _OWNER_OBJECT_RE.findall(sql):
+    for owner, obj in _OWNER_OBJECT_RE.findall(normalize_sql(sql)):
         out.add(f"{owner.upper()}.{obj.upper()}")
     return out
 
@@ -310,11 +338,29 @@ def referenced_tables(sql: str) -> set[str]:
 def forbid_check_for_sql(identity: Identity, sql: str) -> str | None:
     """Return a denial message if `sql` references any table this identity is
     forbidden from. None when the SQL is allowed.
+
+    Tables owned by the session schema (AGENT) resolve without a prefix, so a
+    bare `SELECT * FROM agent_authorizations` is refused too.
     """
+    text = normalize_sql(sql)
     refs = referenced_tables(sql)
-    hit = sorted(t for t in refs if t in set(identity.forbid_tables))
+    # Fail closed: also scan the raw text, in case the lexer misreads a literal.
+    text_raw = sql
+    for owner, obj in _OWNER_OBJECT_RE.findall(sql):
+        refs.add(f"{owner.upper()}.{obj.upper()}")
+    hit = set()
+    for qualified in identity.forbid_tables:
+        owner, _, name = qualified.partition(".")
+        if qualified in refs:
+            hit.add(qualified)
+        elif owner == AGENT_USER.upper() and any(
+            re.search(rf"(?<![\w$#.]){re.escape(name)}(?![\w$#])", t, re.I)
+            for t in (text, text_raw)
+        ):
+            hit.add(qualified)
     if not hit:
         return None
+    hit = sorted(hit)
     return (
         f"Authorization denied: identity {identity.id!r} ({identity.label}, "
         f"clearance={identity.clearance}) is not permitted to read "

@@ -26,22 +26,35 @@ def init_routes(*, agent_conn, memory_client, llm_client):
 
 @api_bp.route("/api/health", methods=["GET"])
 def health():
+    """Oracle is probed with a real round trip; memory and LLM report only
+    whether their client was built (probing the LLM would spend tokens).
+    503 + status "degraded" when the database does not answer, so
+    `curl -f` / start_app.sh notice instead of seeing a cheerful 200."""
+    oracle_ok = False
+    conn = _state.get("agent_conn")
+    if conn is not None:
+        try:
+            conn.ping()
+            oracle_ok = True
+        except Exception as e:
+            print(f"[health] Oracle ping failed: {type(e).__name__}: {e}")
+    components = {
+        "oracle": oracle_ok,
+        "memory": _state.get("memory_client") is not None,
+        "llm": _state.get("llm_client") is not None,
+    }
+    healthy = all(components.values())
     return jsonify({
-        "status": "ok",
-        "components": {
-            "oracle": _state.get("agent_conn") is not None,
-            "memory": _state.get("memory_client") is not None,
-            "llm": _state.get("llm_client") is not None,
-        },
-    })
+        "status": "ok" if healthy else "degraded",
+        "components": components,
+    }), (200 if healthy else 503)
 
 
 @api_bp.route("/api/threads", methods=["GET"])
 def threads():
     rows = list_threads(
-        _state["memory_client"],
+        _state["agent_conn"],
         limit=int(request.args.get("limit", "50")),
-        agent_conn=_state.get("agent_conn"),
     )
     return jsonify({"threads": rows})
 

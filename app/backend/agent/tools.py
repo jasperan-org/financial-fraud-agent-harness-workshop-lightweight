@@ -3,7 +3,7 @@
 Each tool is a Python callable; the @register decorator introspects the signature
 and embeds the description into the in-DB `toolbox` table for vector retrieval.
 
-Per-turn identity is stashed in `_REQUEST_IDENTITY` (a thread/greenlet local).
+Per-turn identity is stashed in `_REQUEST_IDENTITY` (a thread-local).
 `tool_run_sql` reads it before executing so SQL the model constructs is gated
 the same way the Data Explorer's REST endpoints are: forbidden tables refuse,
 masked columns get [REDACTED], rows outside the identity's regions are dropped.
@@ -11,6 +11,7 @@ masked columns get [REDACTED], rows outside the identity's regions are dropped.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import re
@@ -22,6 +23,7 @@ from api.identities import (
     Identity,
     forbid_check_for_sql,
     mask_indices_for,
+    normalize_sql,
     region_drop_predicate,
 )
 from config import (
@@ -31,7 +33,7 @@ from config import (
     TAVILY_API_KEY,
 )
 from retrieval.scanner import Fact, run_scan, write_facts
-from db.deep_security import set_identity as set_db_identity
+from db.deep_security import identity_session
 from memory.manager import (
     INVALIDATING_LINK_TYPES,
     LINK_TYPES,
@@ -48,8 +50,8 @@ _RERANK = None  # callable(query, candidates, top_k, content_key) -> list[dict]
 _SCRATCH = None  # DBFS instance for scratch_write/scratch_read
 
 # Per-turn identity. Set by harness.agent_turn at the start of each user turn,
-# cleared in a finally block. threading.local works under eventlet's greenlets
-# because each greenlet has its own thread-local namespace.
+# cleared in a finally block. Each turn runs on its own OS thread (Socket.IO
+# threading mode), so threading.local isolates concurrent turns.
 _REQUEST_IDENTITY = threading.local()
 
 
@@ -239,6 +241,30 @@ def ensure_toolbox(agent_conn):
 # Tool implementations
 # ============================================================
 _READ_ONLY = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
+
+# Things a regex cannot see through: packages that run a SQL string of their
+# own (so the table checks never see it) or reach outside the database, and
+# inline PL/SQL (`WITH FUNCTION ...`). Refused outright. DML and row locks are
+# not on this list — the session is READ ONLY, so the database refuses them.
+_UNSAFE_SQL = re.compile(
+    r"\b(dbms_xmlgen|dbms_xmlquery|dbms_sql|dbms_scheduler|dbms_job|dbms_pipe|"
+    r"dbms_lock|dbms_session|dbms_rls|dbms_mle|dbms_dbfs\w*|dbms_java\w*|"
+    r"utl_http|utl_tcp|utl_smtp|utl_file|utl_inaddr|utl_mail)\b"
+    r"|\bwith\s+(function|procedure)\b",
+    re.IGNORECASE,
+)
+
+
+def _sql_denial(sql: str, identity: "Identity | None") -> str | None:
+    """Why this SQL (or SQL fragment) must not run, or None. Shared by run_sql
+    and the query_documents predicate so neither is a back door to the other."""
+    m = _UNSAFE_SQL.search(normalize_sql(sql)) or _UNSAFE_SQL.search(sql)
+    if m:
+        return (f"{m.group(0).strip()!r} is not allowed in agent SQL: it can run SQL "
+                "that bypasses the table checks. Use plain SELECT/WITH over tables.")
+    if identity is not None:
+        return forbid_check_for_sql(identity, sql)
+    return None
 
 
 def _retrieve_knowledge(query: str, k: int = 5, kinds=None,
@@ -457,18 +483,14 @@ def _log_dv_fallback_once(view: str, code: int | None) -> None:
           f"direct SQL/JSON document over the base tables (VPD still enforced).")
 
 
-def _set_tool_db_identity() -> None:
-    """Push the active persona into the DB session before a document read, so
-    the DBMS_RLS policies evaluate the right end-user. Mirrors tool_run_sql:
-    without it the policies see a NULL context and let everything through."""
-    identity = get_request_identity()
-    if identity is None:
-        return
-    try:
-        set_db_identity(_AGENT_CONN, identity)
-    except Exception as e:
-        print(f"[tools] DB end-user context not set for document read ({e}); "
-              "relying on application-layer filtering only")
+@contextlib.contextmanager
+def _identity_cursor():
+    """A cursor on a private READ ONLY session carrying the active persona, so
+    the DBMS_RLS policies evaluate the right end-user (see
+    db.deep_security.identity_session). Read any LOB before leaving the block."""
+    with identity_session(get_request_identity(), read_only=True) as conn:
+        with conn.cursor() as cur:
+            yield cur
 
 
 # Hard-coded centroids for bank regions — used by tool_focus_world when the
@@ -499,7 +521,7 @@ def _resolve_world_target(kind: str, target: str):
                 "metadata": {"altitude_hint": c[2]}}
 
     if kind == "branch":
-        with _AGENT_CONN.cursor() as cur:
+        with _identity_cursor() as cur:
             cur.execute(
                 f"SELECT branch_id, name, city, country, region, latitude, longitude "
                 f"  FROM {DEMO_USER}.branches "
@@ -518,7 +540,7 @@ def _resolve_world_target(kind: str, target: str):
                 "metadata": {"branch_id": int(bid), "country": country}}
 
     if kind == "merchant":
-        with _AGENT_CONN.cursor() as cur:
+        with _identity_cursor() as cur:
             cur.execute(
                 f"SELECT merchant_id, name, category, country, region, latitude, longitude "
                 f"  FROM {DEMO_USER}.merchants "
@@ -536,7 +558,7 @@ def _resolve_world_target(kind: str, target: str):
 
     if kind == "customer":
         # Anchor the customer at their primary (oldest) account's branch.
-        with _AGENT_CONN.cursor() as cur:
+        with _identity_cursor() as cur:
             cur.execute(
                 f"SELECT cu.customer_id, cu.full_name, b.name, b.city, b.region, "
                 f"       b.latitude, b.longitude "
@@ -902,41 +924,44 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
 
         identity = get_request_identity()
 
-        # 1. Pre-execution: refuse SQL that touches a forbidden table.
-        if identity is not None:
-            denial = forbid_check_for_sql(identity, sql)
-            if denial:
-                return json.dumps({
-                    "error": denial,
-                    "identity": {
-                        "id": identity.id,
-                        "label": identity.label,
-                        "clearance": identity.clearance,
-                        "forbid_tables": list(identity.forbid_tables),
-                    },
-                })
-
-        # 2. Push the persona into the database session. From here the kernel
-        #    enforces rows, columns and denials itself; the post-fetch filters
-        #    below stay as defence in depth and become no-ops when the database
-        #    already answered correctly. Without this call the DBMS_RLS policies
-        #    evaluate against a NULL context and let everything through.
-        if identity is not None:
-            try:
-                set_db_identity(_AGENT_CONN, identity)
-            except Exception as e:
-                print(f"[tools] DB end-user context not set ({e}); "
-                      "falling back to application-layer filtering only")
+        # 1. Pre-execution: refuse SQL that touches a forbidden table or could
+        #    run SQL we cannot inspect (dynamic-SQL packages, inline PL/SQL).
+        denial = _sql_denial(sql, identity)
+        if denial:
+            out = {"error": denial}
+            if identity is not None:
+                out["identity"] = {
+                    "id": identity.id,
+                    "label": identity.label,
+                    "clearance": identity.clearance,
+                    "forbid_tables": list(identity.forbid_tables),
+                }
+            return json.dumps(out)
 
         try:
-            with _AGENT_CONN.cursor() as cur:
-                cur.execute(sql)
-                cols = [d[0] for d in cur.description]
-                raw_rows = []
-                for i, r in enumerate(cur):
-                    if i >= max_rows:
-                        break
-                    raw_rows.append([(v.read() if hasattr(v, "read") else v) for v in r])
+            max_rows = max(1, int(max_rows))
+        except (TypeError, ValueError):
+            max_rows = 50
+
+        # 2. Run on a dedicated session with the persona pushed into it. From
+        #    here the kernel enforces rows, columns and denials itself; the
+        #    post-fetch filters below stay as defence in depth and become
+        #    no-ops when the database already answered correctly. The session is
+        #    READ ONLY, so the database (not the regex above) refuses DML and
+        #    SELECT ... FOR UPDATE, and it is private to this call, so another
+        #    request's persona cannot bleed into it.
+        truncated = False
+        try:
+            with identity_session(identity, read_only=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                    cols = [d[0] for d in cur.description]
+                    raw_rows = []
+                    for i, r in enumerate(cur):
+                        if i >= max_rows:
+                            truncated = True
+                            break
+                        raw_rows.append([(v.read() if hasattr(v, "read") else v) for v in r])
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -985,6 +1010,8 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
                 )
 
         out = {"columns": cols, "rows": rows, "row_count": len(rows)}
+        if truncated:
+            out["truncated"] = f"more rows exist beyond max_rows={max_rows}; aggregate or filter instead of assuming this is the full result"
         if identity is not None:
             out["identity"] = {
                 "id": identity.id,
@@ -1232,21 +1259,21 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         if denial:
             return json.dumps({"error": denial})
 
-        _set_tool_db_identity()
         k = int(key) if str(key).isdigit() else key
 
         # 1. Preferred path — the duality view.
         try:
-            with _AGENT_CONN.cursor() as cur:
+            with _identity_cursor() as cur:
                 cur.execute(
                     f'SELECT JSON_SERIALIZE(data PRETTY) FROM {DEMO_USER}.{view} '
                     f"WHERE JSON_VALUE(data, '$._id') = :k",
                     k=k,
                 )
                 row = cur.fetchone()
-            if not row:
+                text = _lob_text(row[0]) if row else None
+            if text is None:
                 return json.dumps({"error": f"no document with _id={key} in {view}"})
-            return _lob_text(row[0])
+            return text
         except Exception as e:
             code = _dv_error_code(e)
             if code not in _DV_FALLBACK_CODES:
@@ -1258,16 +1285,17 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         spec = _DOC_SQL[view]
         doc_sql = spec["doc"].replace("__S__", DEMO_USER)
         try:
-            with _AGENT_CONN.cursor() as cur:
+            with _identity_cursor() as cur:
                 cur.execute(
                     f"SELECT JSON_SERIALIZE({doc_sql} RETURNING CLOB PRETTY) "
                     f"FROM {DEMO_USER}.{spec['root']} WHERE {spec['pk']} = :k",
                     k=k,
                 )
                 row = cur.fetchone()
-            if not row:
+                text = _lob_text(row[0]) if row else None
+            if text is None:
                 return json.dumps({"error": f"no document with _id={key} in {view}"})
-            return _lob_text(row[0])
+            return text
         except Exception as e:
             return json.dumps({"error": f"{type(e).__name__}: {e}"})
 
@@ -1295,13 +1323,21 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
         if denial:
             return json.dumps({"error": denial})
 
-        _set_tool_db_identity()
+        # `where` is spliced into SQL: hold it to the same table checks run_sql
+        # applies, so it cannot subquery a table the persona may not read.
+        denial = _sql_denial(where, get_request_identity())
+        if denial:
+            return json.dumps({"error": denial})
+        try:
+            max_rows = max(1, min(int(max_rows), 100))
+        except (TypeError, ValueError):
+            max_rows = 10
 
         # 1. Preferred path — the duality view.
         dv_sql = (f"SELECT JSON_SERIALIZE(data) FROM {DEMO_USER}.{view} "
-                  f" WHERE {where} FETCH FIRST :n ROWS ONLY")
+                  f" WHERE ({where}) FETCH FIRST :n ROWS ONLY")
         try:
-            with _AGENT_CONN.cursor() as cur:
+            with _identity_cursor() as cur:
                 cur.execute(dv_sql, n=max_rows)
                 docs = [_lob_text(r[0]) for r in cur]
             return json.dumps({"count": len(docs), "documents": [json.loads(d) for d in docs]},
@@ -1319,7 +1355,7 @@ def init_tools(agent_conn, memory_client, rerank=None, scratch=None):
                f"FROM {DEMO_USER}.{spec['root']} WHERE ({where}) "
                f"FETCH FIRST :n ROWS ONLY")
         try:
-            with _AGENT_CONN.cursor() as cur:
+            with _identity_cursor() as cur:
                 cur.execute(sql, n=max_rows)
                 docs = [_lob_text(r[0]) for r in cur]
             return json.dumps({"count": len(docs), "documents": [json.loads(d) for d in docs]},

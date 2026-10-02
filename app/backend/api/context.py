@@ -352,20 +352,15 @@ def _tool_manifest(agent_conn, query: str, k: int = 6):
     ]
 
 
-def list_threads(memory_client, limit: int = 50, agent_conn=None) -> list[dict]:
+def list_threads(agent_conn, limit: int = 50) -> list[dict]:
     """List threads for the left nav.
 
     OAMP's `_store.list("thread", ...)` raises `ValueError: Unsupported DB
     record_type` — its `_resolve_record_table` only handles `message` and
     memory-table types. Threads have to be queried directly against the OAMP
-    thread table (`{memory_store_id}_thread`, lowercase, singular).
+    thread table (`{memory_store_id}_thread`, lowercase, singular). That read is
+    plain SQL on `agent_conn`, not an OAMP call, so it needs no OAMP lock.
     """
-    if agent_conn is None:
-        # Fall back to the OAMP connection if no explicit agent_conn was passed.
-        agent_conn = getattr(memory_client._store, "_conn", None)
-    if agent_conn is None:
-        print("[context] list_threads: no connection available")
-        return []
 
     table_name = "eda_onnx_thread"  # matches memory_store_id='EDA_ONNX' in memory/manager.py
     try:

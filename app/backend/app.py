@@ -1,11 +1,12 @@
 """Flask + Socket.IO entry point.
 Mirrors finance-ai-agent-demo's app.py shape: connect → init memory → init tools →
-register API blueprint and socket events → run."""
+register API blueprint and socket events → run.
 
-import eventlet  # noqa: E402
+Runs in Flask-SocketIO's `threading` mode: real OS threads, WebSocket transport via
+simple-websocket. No monkey-patching — OAMP's memory-extraction worker runs its own
+asyncio loop on its own thread, and that only works when threads are real."""
 
-eventlet.monkey_patch()
-
+import logging  # noqa: E402
 
 from flask import Flask  # noqa: E402
 from flask_cors import CORS  # noqa: E402
@@ -17,7 +18,22 @@ from config import FLASK_DEBUG, FLASK_PORT, FLASK_SECRET_KEY  # noqa: E402
 app = Flask(__name__)
 app.config["SECRET_KEY"] = FLASK_SECRET_KEY
 CORS(app, resources={r"/api/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+
+class _WebSocketHandoffFilter(logging.Filter):
+    """Werkzeug's dev server logs a bogus `400 ... HTTP/0.9` pair each time a
+    WebSocket closes: simple-websocket owns the socket after the upgrade, and
+    Werkzeug then tries to parse the client's close frame as a new HTTP request.
+    The connection itself is fine; drop just those two lines."""
+
+    def filter(self, record):
+        msg = record.getMessage()
+        return not (msg.startswith("code 400, message Bad")
+                    or 'HTTP/0.9" 400' in msg)
+
+
+logging.getLogger("werkzeug").addFilter(_WebSocketHandoffFilter())
 
 
 def init_app():
@@ -30,7 +46,7 @@ def init_app():
 
     print("\n[2/4] Initializing OAMP memory client...")
     from memory.manager import build_memory_client
-    memory_client = build_memory_client(agent_conn)
+    memory_client = build_memory_client()
     print("  Memory client ready.")
 
     print("\n[3/4] Initializing tools + skillbox + scratchpad + reranker...")
@@ -39,7 +55,7 @@ def init_app():
     from db.dbfs import DBFS
     from db.reranker_setup import ensure_reranker
     from db.scheduler_setup import (
-        drain_queued_scans, ensure_scan_history, ensure_scheduler,
+        ensure_scan_history, ensure_scheduler, start_drain_loop,
     )
     from retrieval.rerank import rerank_factory
     ensure_skillbox(agent_conn)
@@ -60,19 +76,18 @@ def init_app():
     # scans only happen on `tool_scan_database` or POST /api/data/scan/<owner>.
     import os as _os
     from config import DEMO_USER as _DEMO
-    _interval = int(_os.environ.get("SCAN_INTERVAL_MIN", "0"))
+    _interval = int(_os.environ.get("SCAN_INTERVAL_MIN") or "0")
     if _interval > 0:
         sched = ensure_scheduler(agent_conn, _interval, _DEMO.upper())
         print(f"  Scheduler: {sched['reason']} "
               f"(job={sched['job_name']!r}, interval={sched['interval_min']}min, "
               f"owner={sched['owner']!r})")
-        # Drain any rows the scheduler queued while we were down so the
-        # institutional knowledge catches up before the first user message.
-        ran = drain_queued_scans(agent_conn, memory_client)
-        if ran:
-            print(f"  Drained {ran} backlogged scan(s) from scan_history.")
     else:
         print("  Scheduler: not requested (set SCAN_INTERVAL_MIN to enable).")
+    # A job from scripts/setup_advanced.py may exist whatever SCAN_INTERVAL_MIN
+    # says, and it only enqueues rows — drain them for as long as we run
+    # (backlogs are coalesced per schema).
+    start_drain_loop(socketio, memory_client)
 
     print("\n[4/4] Initializing LLM client...")
     from agent.llm import build_llm_client
@@ -110,4 +125,7 @@ init_app()
 
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=FLASK_PORT, debug=FLASK_DEBUG)
+    # Werkzeug's dev server (threaded: one OS thread per request/socket) is the
+    # threading-mode server; no reloader — it would run init_app() twice.
+    socketio.run(app, host="0.0.0.0", port=FLASK_PORT, debug=FLASK_DEBUG,
+                 use_reloader=False, allow_unsafe_werkzeug=True)

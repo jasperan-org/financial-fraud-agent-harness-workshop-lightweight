@@ -12,12 +12,17 @@ UserOwnRows + GlobalMemories policies on a Deep Sec-capable database and
 
 from __future__ import annotations
 
+import functools
+import inspect
+import threading
+
 import numpy as np
 
 import os
 
 from oracleagentmemory.core import OracleAgentMemory
 from oracleagentmemory.core.llms import Llm
+from oracleagentmemory.core.thread import BaseThread
 from oracleagentmemory.apis.embedders.embedder import IEmbedder
 
 from config import (
@@ -27,6 +32,7 @@ from config import (
     ONNX_EMBED_DIM, ONNX_EMBED_MODEL,
     OPENAI_API_KEY,
 )
+from db.connection import create_agent_pool
 
 # OAMP >= 26.6 names the managed DB objects from `memory_store_id`; the older
 # `table_name_prefix` is deprecated and removed in 27.1. "EDA_ONNX" resolves to
@@ -93,7 +99,10 @@ def content_to_text(content) -> str:
 
 class OracleONNXEmbedder(IEmbedder):
     """Routes embedding through Oracle's in-DB ONNX model (§3.4 of the notebook).
-    Same connection the OAMP client uses → no network round-trip, no extra keys.
+    Same database the OAMP client uses → no network round-trip, no extra keys.
+
+    `conn` is a connection or a connection pool (OAMP's background extraction
+    worker embeds from its own thread, so the app hands it the pool).
     """
 
     def __init__(self, conn, model_name: str = ONNX_EMBED_MODEL, dim: int = ONNX_EMBED_DIM):
@@ -104,11 +113,17 @@ class OracleONNXEmbedder(IEmbedder):
     def embed(self, texts: list[str], *, is_query: bool = False) -> np.ndarray:
         out = np.zeros((len(texts), self._dim), dtype=np.float32)
         sql = f"SELECT VECTOR_EMBEDDING({self._model} USING :t AS DATA) FROM dual"
-        with self._conn.cursor() as cur:
-            for i, t in enumerate(texts):
-                cur.execute(sql, t=t)
-                vec = cur.fetchone()[0]
-                out[i] = np.asarray(list(vec), dtype=np.float32)
+        pooled = hasattr(self._conn, "acquire")
+        conn = self._conn.acquire() if pooled else self._conn
+        try:
+            with conn.cursor() as cur:
+                for i, t in enumerate(texts):
+                    cur.execute(sql, t=t)
+                    vec = cur.fetchone()[0]
+                    out[i] = np.asarray(list(vec), dtype=np.float32)
+        finally:
+            if pooled:
+                conn.close()
         return out
 
     async def embed_async(self, texts: list[str], *, is_query: bool = False) -> np.ndarray:
@@ -147,22 +162,78 @@ def build_extraction_llm():
     return None
 
 
-def build_memory_client(agent_conn) -> OracleAgentMemory:
-    """The single OAMP client used by the loop and the API.
+# --------------------------------------------------------------------------- #
+# Thread safety
+# --------------------------------------------------------------------------- #
+# The app runs on real OS threads (Flask-SocketIO `threading` mode): chat turns,
+# REST handlers, the scheduler drain loop and the AML recall all call OAMP. OAMP
+# is not safe for that — one store per client, and its sync API spins up an
+# asyncio loop per call. So every call into it goes through ONE app-wide
+# re-entrant lock (the same rule as the notebook's `_OAMP_LOCK`), applied
+# centrally by `_Locked` below instead of at each call site.
+#
+# OAMP's own background extraction / summary worker runs on its own thread
+# *outside* this lock, so it must not share a database session with the
+# foreground calls: the client sits on its own connection pool (see
+# `build_memory_client`), never on the app's shared AGENT connection.
+OAMP_LOCK = threading.RLock()
+
+
+class _Locked:
+    """Transparent proxy that runs every method of the wrapped OAMP object under
+    `OAMP_LOCK`. Thread objects handed back by `get_thread`/`create_thread` are
+    wrapped the same way, and so is the `_store` the app reaches into directly.
+    Plain data (records, search results, ids) passes through unwrapped.
+
+    The lock is held for the duration of one OAMP call only. Callers must never
+    wrap an LLM chat call of their own in it.
+    """
+
+    __slots__ = ("_target",)
+
+    def __init__(self, target):
+        object.__setattr__(self, "_target", target)
+
+    def __getattr__(self, name):
+        attr = getattr(self._target, name)
+        if name == "_store":
+            return _Locked(attr)
+        if not callable(attr) or inspect.iscoroutinefunction(attr):
+            return attr
+
+        @functools.wraps(attr)
+        def locked_call(*args, **kwargs):
+            with OAMP_LOCK:
+                result = attr(*args, **kwargs)
+            return _Locked(result) if isinstance(result, BaseThread) else result
+
+        return locked_call
+
+    def __setattr__(self, name, value):
+        setattr(self._target, name, value)
+
+    def __repr__(self):
+        return f"<_Locked {self._target!r}>"
+
+
+def build_memory_client() -> OracleAgentMemory:
+    """The single OAMP client used by the loop and the API (lock-wrapped).
 
     If no LLM is available we still build the client (for memory storage and
     semantic retrieval), but disable auto-extraction so OAMP doesn't hit a
     None LLM during add_messages.
     """
     extraction_llm = build_extraction_llm()
+    pool = create_agent_pool(min=1, max=4)
     client = OracleAgentMemory(
-        connection=agent_conn,
-        embedder=OracleONNXEmbedder(agent_conn),
+        connection=pool,
+        embedder=OracleONNXEmbedder(pool),
         llm=extraction_llm,
         extract_memories=(extraction_llm is not None),
         schema_policy="create_if_necessary",
         memory_store_id=MEMORY_STORE_ID,
     )
+    client = _Locked(client)
     for register_fn, eid, info in [
         (client.add_user, USER_ID, "Operator querying the enterprise database in natural language."),
         (client.add_agent, AGENT_ID, "Data agent grounded in scanned schema metadata."),
@@ -177,15 +248,16 @@ def build_memory_client(agent_conn) -> OracleAgentMemory:
 
 def get_or_create_thread(client: OracleAgentMemory, thread_id: str):
     """Return the OAMP thread for a harness-level id, creating it on first use."""
-    try:
-        return client.get_thread(thread_id)
-    except Exception:
-        return client.create_thread(
-            thread_id=thread_id,
-            user_id=USER_ID,
-            agent_id=AGENT_ID,
-            enable_context_summary=True,
-        )
+    with OAMP_LOCK:  # get-then-create must be atomic across request threads
+        try:
+            return client.get_thread(thread_id)
+        except Exception:
+            return client.create_thread(
+                thread_id=thread_id,
+                user_id=USER_ID,
+                agent_id=AGENT_ID,
+                enable_context_summary=True,
+            )
 
 
 # --------------------------------------------------------------------------- #
