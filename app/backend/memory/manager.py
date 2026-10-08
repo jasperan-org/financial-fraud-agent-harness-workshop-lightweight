@@ -7,7 +7,7 @@ small and stable.
 OAMP 26.8 adds database-native Deep Data Security for this store
 (`oracleagentmemory.core.deepsec`): `db/deep_security.py` installs the
 UserOwnRows + GlobalMemories policies on a Deep Sec-capable database and
-`docs/part-8-deep-data-security.md` walks through the runtime context.
+`docs/reference/deep-data-security.md` walks through the runtime context.
 """
 
 from __future__ import annotations

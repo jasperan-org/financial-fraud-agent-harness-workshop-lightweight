@@ -145,4 +145,4 @@ LIVE_FEED_BURST = float(os.environ.get("LIVE_FEED_BURST", "0.10"))          # ch
 # window; drawing every home-branch → merchant arc saturates the globe, so the
 # API returns only the *most recent* N arcs. The flagged dots are left uncapped
 # (they read as a heat map); override the arc cap with WORLD_ARC_LIMIT.
-WORLD_ARC_LIMIT = int(os.environ.get("WORLD_ARC_LIMIT", "30"))
+WORLD_ARC_LIMIT = int(os.environ.get("WORLD_ARC_LIMIT", "10"))

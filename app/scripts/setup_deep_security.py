@@ -358,7 +358,7 @@ def install_vpd(sys_conn, agent_conn, demo_conn, identities, agent_user: str = "
 
     with demo_conn.cursor() as cur:
         # This installer owns the policies on these tables. Clear whatever a
-        # previous run (or the notebook's Part 8) left behind first: a stale
+        # previous run (or an earlier run) left behind first: a stale
         # policy still points at the predicate function we are about to replace,
         # which surfaces later as ORA-28113 on an unrelated SELECT.
         cur.execute(

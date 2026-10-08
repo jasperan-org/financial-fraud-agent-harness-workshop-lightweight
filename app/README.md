@@ -133,7 +133,7 @@ The app can also *simulate the bank operating*. `db/live_feed.py` runs a backgro
 - Runs a **radar sweep** and a **live ticker** naming the latest transaction.
 - Ticks a **live counter** (`+N live`) in the header and the toolbar.
 
-The globe stays legible under load, and the live layer is built to be *watched* rather than rebuilt. Every live halo is **checkpointed by transaction id** (the `liveArcs` registry in `WorldExplorer.jsx`): the arc objects outlive a data update, and three-globe keys its layers by datum reference, so the same line — and the dash phase animating inside it — stays alive. A new hit therefore **never restarts the halos already gliding**, which is what used to happen when every update rebuilt the whole array. The newest `LIVE_ARC_MAX` (10) stay in flight, each one's **pulse intensity is its recency** (exponential decay, 45-second half-life, ~3-minute life), and the halo pushed out **dissipates** over ~1.8 s instead of being cut mid-glide. A brand-new hit is unmistakable: white-hot and thicker for its first 2.2 s, its comet running fast, with a birth ping ringing at its destination. The fetched arcs from `/api/world` (`WORLD_ARC_LIMIT`, default 30 of the ~160 in the 120-day window) get the same object-stability treatment — otherwise they would re-animate on every live event.
+The globe stays legible under load, and the live layer is built to be *watched* rather than rebuilt. Every live halo is **checkpointed by transaction id** (the `liveArcs` registry in `WorldExplorer.jsx`): the arc objects outlive a data update, and three-globe keys its layers by datum reference, so the same line — and the dash phase animating inside it — stays alive. A new hit therefore **never restarts the halos already gliding**, which is what used to happen when every update rebuilt the whole array. The newest `LIVE_ARC_MAX` (10) stay in flight, each one's **pulse intensity is its recency** (exponential decay, 45-second half-life, ~3-minute life), and the halo pushed out **dissipates** over ~1.8 s instead of being cut mid-glide. A brand-new hit is unmistakable: white-hot and thicker for its first 2.2 s, its comet running fast, with a birth ping ringing at its destination. The fetched arcs from `/api/world` (`WORLD_ARC_LIMIT`, default 10 of the ~160 in the 120-day window) get the same object-stability treatment — otherwise they would re-animate on every live event.
 
 The feed is bounded and self-cleaning: live rows use a reserved `txn_id` range (≥ 9,000,000), are capped (`LIVE_FEED_MAX`, default 300) and expire (`LIVE_FEED_TTL_MIN`, default 25 min), so the curated seed data is never touched. It respects identity on the client — a persona only plots events in its authorized regions, and masked amounts render as `[REDACTED]`. Toggle it live from the header **live / paused** pill, or disable it entirely with `LIVE_FEED=false`.
 
@@ -141,21 +141,21 @@ Because the rows land in `FINANCE.TRANSACTIONS`, the agent sees them too — ask
 
 ### 9. The autonomous AML desk — a captured Grok run, replayed live
 
-The `Autonomous` tab turns the agent outward: instead of answering questions, it works the bank's AML alert queue. The queue *is* the data — every `(customer, typology)` group of `FLAGGED` / `BLOCKED` transactions in the last 30 days, the aggregation from notebook §12.3.
+The `Autonomous` tab turns the agent outward: instead of answering questions, it works the bank's AML alert queue. The queue *is* the data — every `(customer, typology)` group of `FLAGGED` / `BLOCKED` transactions in the last 30 days, the aggregation from notebook §6.1.
 
-The honest constraint: an autonomous loop that decides is a **metered** loop — the captured morning below cost 6 model round-trips and 29,309 tokens across three alerts. A workshop cannot spend that per attendee, so `agent/aml_capture.py` holds one **real Grok-4.3 run** (executed 2026-09-29) verbatim — its queries, rationales, confidences, next actions, even the §12.9 recap answer — and `agent/aml_replay.py` replays it. Nothing in the replay is invented.
+The honest constraint: an autonomous loop that decides is a **metered** loop — the captured morning below cost 6 model round-trips and 29,309 tokens across three alerts. A workshop cannot spend that per attendee, so `agent/aml_capture.py` holds one **real Grok-4.3 run** (executed 2026-09-29) verbatim — its queries, rationales, confidences, next actions, even the §6.4 recap answer — and `agent/aml_replay.py` replays it. Nothing in the replay is invented.
 
 **Work the queue** starts a sweep (Socket.IO `aml_sweep_run`):
 
 | Step | What streams to the panel | Where it comes from |
 |---|---|---|
-| Evidence pack | `ALERT` / `RULE` / `QUEUE` / flagged txns / surrounding activity / accounts / 30-day flow / prior SARs | Assembled **live from `FINANCE`**, notebook §12.4's queries |
+| Evidence pack | `ALERT` / `RULE` / `QUEUE` / flagged txns / surrounding activity / accounts / 30-day flow / prior SARs | Assembled **live from `FINANCE`**, notebook §6.2's queries |
 | Tool call | `search_knowledge` with its arguments and the lines it returned | The captured call, at its captured latency |
 | Model call | `model call · xai.grok-4.3` | The captured latency (22–24 s; the whole sweep lands within a second of the recorded 89 s) |
 | Decision | `ESCALATE` / `KYC_REVIEW` / `DISMISS` + confidence + rationale + next action + SAR code | The captured reply, verbatim |
 | Record | an `AGENT.AML_REPLAY` row (run id, decision, mode, elapsed, tokens) | Written by the sweep |
 
-Alerts the capture has no decision for replay the same step shape and take the harness's own fallback — `REVIEW_REQUIRED`, confidence 0.0, "no validated model reply captured" — and the card reads `no capture → human review` rather than `captured`. Ordering prefers captured pairs so a demo sweep actually shows decisions (`AML_QUEUE_PREFER_CAPTURE=false` restores pure recency). The tab also offers **recall the morning**: the §12.9 call where the agent answers questions *about its own triage run* from memory — 16.2 s, no SQL.
+Alerts the capture has no decision for replay the same step shape and take the harness's own fallback — `REVIEW_REQUIRED`, confidence 0.0, "no validated model reply captured" — and the card reads `no capture → human review` rather than `captured`. Ordering prefers captured pairs so a demo sweep actually shows decisions (`AML_QUEUE_PREFER_CAPTURE=false` restores pure recency). The tab also offers **recall the morning**: the §6.4 call where the agent answers questions *about its own triage run* from memory — 16.2 s, no SQL.
 
 The boundary survives the replay: the sweep never writes to `FINANCE` and never touches `AGENT.AML_TRIAGE` — that table is the genuine capture, and both it and the replay ledger are browsable in the Data Explorer. Feeding the loop is `db/live_feed.py`'s **spotlight** (`LIVE_FEED_SPOTLIGHT`, 60%): flagged live events land on the captured cases' own accounts, carrying the case's typology, size and block outcome, so the globe, the queue and the triage story all point at the same customers. Set `LIVE_FEED_SPOTLIGHT=1` for an all-captured demo; `AML_REPLAY_SPEED` scales the replay (1 = the real timings, 0.05 = one sweep in seconds).
 
@@ -215,7 +215,7 @@ WebSocket + REST (Socket.IO)
   └─ /api/threads, /api/context/<thread_id>, /api/world, /api/health (pings Oracle; 503 + "degraded" if it does not answer)
 
 Flask API (Python · Socket.IO threading mode)
-  ├─ agent/harness.py        -- the notebook's §7.2 loop, with the skill manifest prepended (§6.4)
+  ├─ agent/harness.py        -- the notebook's §5.3 loop, with the skill manifest prepended (§4.4)
   ├─ agent/tools.py          -- search_knowledge · run_sql · exec_js · remember ·
   │                             scan_database · load_skill · list_skills
   ├─ agent/skills.py         -- skillbox (Oracle skills repo ingestion)
@@ -304,7 +304,7 @@ python scripts/setup_deep_security.py --demo      # + same-SQL/different-persona
 python scripts/setup_deep_security.py --ddl-only  # write the Deep Sec DDL, touch nothing
 ```
 
-Probes the instance, seeds the persona rule tables, and installs the 15 `DBMS_RLS` policies on `FINANCE` — or writes the equivalent `CREATE DATA ROLE` / `CREATE END USER` / `CREATE DATA GRANT` DDL when Deep Data Security is available. Safe to re-run: it clears the policies it owns before reinstalling, so this script and the notebook's §6.7 (which only *reads* under an identity) never fight over state. Deep dive: [`docs/part-8-deep-data-security.md`](../docs/part-8-deep-data-security.md).
+Probes the instance, seeds the persona rule tables, and installs the 15 `DBMS_RLS` policies on `FINANCE` — or writes the equivalent `CREATE DATA ROLE` / `CREATE END USER` / `CREATE DATA GRANT` DDL when Deep Data Security is available. Safe to re-run: it clears the policies it owns before reinstalling, so re-running this script never leaves stale state. Deep dive: [`docs/reference/deep-data-security.md`](../docs/reference/deep-data-security.md).
 
 ## Run
 
@@ -362,7 +362,7 @@ Drop these into the chat to exercise different parts of the harness:
 ## Notes
 
 - The agent runs as `AGENT_USER` with whatever grants you've given it. `tool_run_sql` is read-only (its session is opened READ ONLY, and a denylist rejects dynamic-SQL packages and `FOR UPDATE`). Identity is enforced by the database: `tool_run_sql` and the Data Explorer each take a private session from `identity_session` and call `AGENT.set_eda_ctx` on it before executing, so the `DBMS_RLS` policies installed by `scripts/setup_deep_security.py` scope every query. Set the persona in the header and the same SQL returns different rows — you never set `EDA_CTX.END_USER` yourself.
-- ⚠️ The VPD backend is **fail-open**: with no end-user context set, every policy predicate evaluates to `1=1` and all rows are visible. Deep Data Security (Enterprise-class 26ai) is **default-deny**. That gap is the honest caveat of this demo — see [`docs/part-8-deep-data-security.md`](../docs/part-8-deep-data-security.md).
+- ⚠️ The VPD backend is **fail-open**: with no end-user context set, every policy predicate evaluates to `1=1` and all rows are visible. Deep Data Security (Enterprise-class 26ai) is **default-deny**. That gap is the honest caveat of this demo — see [`docs/reference/deep-data-security.md`](../docs/reference/deep-data-security.md).
 - The two JSON-relational duality views (`account_dv`, `customer_dv`) are read-only; the `get_document` and `query_documents` tools call them through `agent_conn` so the kernel-level row/column policies on the underlying tables apply transparently to the JSON output.
 - Spatial queries use SRID 8307 (WGS84). `branches.location` and `merchants.location` are both indexed (`MDSYS.SPATIAL_INDEX_V2`).
 - WebSocket transport only (Socket.IO `transports: ["websocket"]`); CORS is open during dev because Vite proxies `/api` and `/socket.io` to the backend.

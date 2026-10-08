@@ -10,7 +10,7 @@ The formula:
 Agent = Model + Harness
 ```
 
-The model emits tokens. Everything else — state, memory, tool dispatch, identity, budgets, retry logic — is **harness code**. Most "agent quality" complaints are harness problems, not model problems. Part 1 connects the notebook to Oracle; the later parts implement the core harness.
+The model emits tokens. Everything else — state, memory, tool dispatch, identity, budgets, retry logic — is **harness code**. Most "agent quality" complaints are harness problems, not model problems. Part 1 connects the notebook to Oracle; Parts 2–5 implement the harness; Part 6 runs it unattended.
 
 ## Canonical environment
 
@@ -66,7 +66,7 @@ The app normalizes a bare OCI regional endpoint by appending `/openai/v1`; the n
 
 ## Connect in the notebook
 
-Part 1 has one small TODO. Run the import and connection cells from the repository root:
+Part 1 has one TODO (§1.3). Run the import and connection cells from the repository root:
 
 ```python
 SYS_DSN    = "localhost:1521/FREEPDB1"
@@ -77,25 +77,23 @@ DEMO_USER  = "FINANCE"
 agent_conn = connect(AGENT_USER, AGENT_PASS, SYS_DSN)
 ```
 
-The `connect` helper retries because a Docker healthcheck can pass before Oracle's listener is ready to accept application sessions. After the connection succeeds, Part 2 creates the OAMP client and starts scanning `FINANCE` catalog metadata.
+The `connect` helper retries because a Docker healthcheck can pass before Oracle's listener is ready to accept application sessions. 
 
-### §1.3 Preflight — run it before anything else
+### §1.2 Preflight
 
-Right after the connection cell, the notebook runs a **preflight**: a dozen fast queries against the same catalogs the scanner will read, plus the LLM credentials. It reports FINANCE's tables and the AML rows in the seed, the in-database ONNX embedder and reranker, the OAMP memory table, the Oracle Text index, `toolbox` / `skillbox`, and the API keys.
+The connection cell is followed by a **preflight**: a dozen fast queries against the same catalogs the scanner will read, plus the LLM credentials. It reports FINANCE's tables and the AML rows in the seed, the in-database ONNX embedder and reranker, the OAMP memory table, the Oracle Text index, `toolbox` / `skillbox`, and the API keys.
 
 Each ❌ row prints the command that fixes it (`cd app && python scripts/bootstrap.py && python scripts/seed.py` for a missing seed, the Codespaces-secret instructions for a missing key). Only two failures stop the notebook — no `FINANCE`, no embedder — because everything from Part 2 on depends on those. If the preflight is green, the rest of the workshop has what it needs.
-
-The preflight takes the §1.3 slot; the chat-client section that follows is §1.4.
 
 If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, and `setup_deep_security.py` — the Codespace runs exactly those four, in that order, whenever a layer is missing (`.devcontainer/provision.sh`; whatever is already in place is left alone). `seed.py` itself is not idempotent — it drops and recreates `FINANCE`, including its policies — which is why `setup_deep_security.py` always runs after it.
 
 ### Kernel dependencies
 
-The workshop kernel is the Codespace's Python 3.11 (`/usr/local/bin/python`, `pip install -r requirements.txt -r app/backend/requirements.txt`). §0.1 checks for them before anything else runs: `numpy`, `oracledb`, `openai`, `oracleagentmemory` — and `langchain_oracledb`, which §3.6 uses to show the same embeddings and retrieval legs through LangChain. §1.3 prints each version; if the preflight says a version is unknown, re-run the Codespace's build step (`bash .devcontainer/setup_build.sh`) rather than pip-installing into a different interpreter.
+The workshop kernel is the Codespace's Python 3.11 (`/usr/local/bin/python`, `pip install -r requirements.txt -r app/backend/requirements.txt`). The notebook needs `numpy`, `oracledb`, `openai`, `oracleagentmemory` and `langchain_oracledb` (Part 3). §1.2 prints each version; if the preflight says a version is unknown, re-run the Codespace's build step (`bash .devcontainer/setup_build.sh`) rather than pip-installing into a different interpreter.
 
-## TODO 1: Talk to the bare model
+## TODO 1: `QUESTION`
 
-The chat-client cell ends with your first TODO: set `QUESTION`, run the cell, and read the answer. There is no harness here, no memory, no retrieval, no tools; it is the reasoning core on its own. Remember this baseline, because Part 7 wraps the same call in a context block, retrieved tool schemas, and a dispatch loop.
+§1.3: set `QUESTION`, run the cell, read the answer. No memory, retrieval or tools: this is the bare model, the baseline Part 5 wraps in a context block and a dispatch loop.
 
 **Solution:**
 
@@ -131,7 +129,7 @@ tail -40 .devcontainer/logs/frontend.log
 - **Separate the agent's DB user from the data's DB user.** `AGENT` owns harness state; `FINANCE` owns the bank data. The trust boundary is grants, not Python code — and it makes the persona demo in the app real.
 - **`vector_memory_size` is non-optional for HNSW.** Without it, vector-index creation raises `ORA-51962`.
 - **ONNX models load *into* the database.** Embeddings come from `VECTOR_EMBEDDING(...)` SQL calls, not network round-trips.
-- **The AML use case already has opinions in the data.** `transactions.amount_cents` is USD **cents** and `customers.risk_rating` is a 1–100 score — both documented with `COMMENT ON COLUMN` so the scanner (Part 2) teaches the model those rules.
+- **The AML use case already has opinions in the data.** `transactions.amount_cents` is USD **cents** and `customers.risk_rating` is a 1–100 score — both documented with `COMMENT ON COLUMN` so the scanner (§2.3) teaches the model those rules.
 
 ## Troubleshooting
 

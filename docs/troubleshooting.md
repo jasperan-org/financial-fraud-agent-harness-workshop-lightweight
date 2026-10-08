@@ -163,9 +163,9 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 ---
 
-### The notebook's first cell says the kernel is missing `oracledb` / `numpy` / `openai` / `oracleagentmemory`
+### An import fails: `oracledb` / `numpy` / `openai` / `oracleagentmemory`
 
-**Symptom:** `§0.1` raises `This kernel is missing: ...`.
+**Symptom:** `ModuleNotFoundError` in the first code cells.
 
 **Cause:** VS Code picked a different Python interpreter than the workshop one.
 
@@ -173,7 +173,7 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 ---
 
-### `§1.3` preflight is red
+### `§1.2` preflight is red
 
 **Symptom:** The preflight table prints one or more ❌ rows.
 
@@ -182,17 +182,17 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 - *FINANCE tables / transactions / SAR reports* → the seed did not finish: `cd app && python scripts/bootstrap.py && python scripts/seed.py`.
 - *ONNX embedder missing* → `cd app && python scripts/bootstrap.py` (needs the `vector_memory_size` pool from the same script).
 - *credentials: 0 key(s)* → no OCI GenAI key reached the kernel's environment; add it as a Codespaces secret (then restart), or re-run §1.1 and paste the key at its prompt. (`app/.env` feeds the app, not the notebook kernel.)
-- *Oracle Text index absent* → informational: `§3.3a` creates it before the keyword leg needs it.
+- *Oracle Text index absent* → informational: §3.1 creates it before the keyword leg needs it.
 
 The cell hard-fails only on a seeded `FINANCE` and a present embedder, because every later block depends on those two.
 
 ---
 
-### Part 12 (`Autonomous AML triage`) issues
+### Part 6 (`Autonomous AML triage`) issues
 
 **Symptom:** `0 alert(s)` in the queue, `REVIEW_REQUIRED` rows, or every alert failing with a stub error.
 
-**Fix:** See the troubleshooting section of [Part 12 — Autonomous AML triage](part-12-autonomous-aml-triage.md#troubleshooting). The short version: `0 alerts` means the watermark already covers the window (`IGNORE_WATERMARK = True` re-triages it); `REVIEW_REQUIRED` is the intended fallback when a model reply does not validate; a stub error means a TODO above is still unimplemented.
+**Fix:** See the troubleshooting section of [Part 6: Autonomous AML triage](part-6-autonomous-aml-triage.md#troubleshooting). The short version: `0 alerts` means the watermark already covers the window (`IGNORE_WATERMARK = True` re-triages it); `REVIEW_REQUIRED` is the intended fallback when a model reply does not validate; a stub error means a TODO above is still unimplemented.
 
 ---
 
@@ -270,11 +270,11 @@ retrieve_knowledge("table", k=5)  # no kinds filter
 
 **Fix:** Make sure the loop body is in this order:
 
-1. `resp = chat(messages, tools=tool_schemas)`
-2. **Append the assistant message with `tool_calls`** to `messages`
-3. For each `tc` in `msg.tool_calls`, dispatch and append a `tool` message with `tool_call_id=tc.id`
+1. `msg = chat(messages, tools=tool_schemas).choices[0].message`
+2. **Append `assistant_message(msg)`** to `messages`
+3. For each `tc` in `msg.tool_calls`, append a `tool` message with `tool_call_id=tc.id` (`call_tool` runs it)
 
-See [Part 7 guide](part-7-agent-loop.md) for the exact pattern.
+See [§5.3 in the Part 5 guide](part-5-agent-loop.md#todo-9-agent_turn) for the exact pattern.
 
 ---
 
@@ -326,34 +326,28 @@ A predicate is subquerying a table that carries a policy of its own. `FINANCE.br
 
 ### `ORA-23607: invalid column` from a mask
 
-The mask registry names a column that does not exist. This is the failure mode Part 8 is built around: in Python a wrong column name is a silent no-op, while the kernel rejects it immediately. Check the persona masks in `api/identities.py` against the real schema.
+The mask registry names a column that does not exist. This is the failure mode the [Deep Data Security reference](reference/deep-data-security.md) is built around: in Python a wrong column name is a silent no-op, while the kernel rejects it immediately. Check the persona masks in `api/identities.py` against the real schema.
 
-### `NameError: name 'CURRENT_END_USER' is not defined` in the notebook
+### `NameError: name 'CURRENT_END_USER' is not defined`
 
-That name belongs to the long-form reference build, not to this lightweight notebook. Here the
-identity boundary is `AGENT.SET_EDA_CTX` (set directly, or through the app's
-`db/deep_security.py::set_identity`); the notebook demonstrates it in **§6.7**, and no notebook
-tool reads a `CURRENT_END_USER` handle. If you are porting code from the long-form build, replace
+That name belongs to the long-form reference build. Here the identity boundary is
+`AGENT.SET_EDA_CTX` (set directly, or through the app's `db/deep_security.py::set_identity`); the
+notebook has no identity section. If you are porting code from the long-form build, replace
 that handle with a `SET_EDA_CTX` call before the statement.
 
-### Part 8 changes disappear after a rebuild
+### Identity changes disappear after a rebuild
 
-Nothing generated owns the identity code in this repository: the policies are installed by
-`python app/scripts/setup_deep_security.py` (idempotent) and the notebook section is ordinary
-notebook content — edit it in place. The two generator scripts that *do* own notebook blocks are
-`scripts/insert_autonomy_section.py` (kernel check, preflight, Part 12) and
-`scripts/add_concept_demos.py` (the four without-vs-with cells); those are the cells not to
-hand-edit.
+The policies are installed by `python app/scripts/setup_deep_security.py` (idempotent); re-run it after `seed.py`. The notebooks are generated from `.nbwork/parts` (see the README's maintainer section): edit the parts, never the `.ipynb`.
 
 ---
 
-## LangChain interop (§3.6)
+## LangChain interop (Part 3)
 
-**`ModuleNotFoundError: No module named 'langchain_oracledb'`** — the kernel is missing the interop package. It is part of `requirements.txt`; on a Codespace re-run `bash .devcontainer/setup_build.sh`, locally `pip install -r requirements.txt`. §0.1 fails fast with the same message.
+**`ModuleNotFoundError: No module named 'langchain_oracledb'`** — the kernel is missing the interop package. It is part of `requirements.txt`; on a Codespace re-run `bash .devcontainer/setup_build.sh`, locally `pip install -r requirements.txt`.
 
 **`RuntimeError: Failed due to a DB error: ORA-29879: cannot create multiple domain indexes on a column list using same indextype`** — you asked `create_hybrid_index` for a table that already has a standalone vector index and an Oracle Text index (`OracleVS.from_texts` + `create_text_index` produce exactly that pair). A hybrid index *is* both, so it needs its own table. To try the hybrid retriever, create an `OracleVS` table, drop the vector index LangChain created on it, then create the hybrid index.
 
-**`OracleTextSearchRetriever` returns nothing for a natural-language question** — Oracle Text wants an *expression*, not a sentence: `amount_cents OR cents OR USD`, or `operator_search=True` with your own `AND`/`OR`/`NEAR` operators. It also needs a text index on the column (`create_text_index`, §3.6).
+**`OracleTextSearchRetriever` returns nothing for a natural-language question** — Oracle Text wants an *expression*, not a sentence: `amount_cents OR cents OR USD`, or `operator_search=True` with your own `AND`/`OR`/`NEAR` operators. It also needs a text index on the column (`create_text_index`, §3.1).
 
 ## Checking System Status
 

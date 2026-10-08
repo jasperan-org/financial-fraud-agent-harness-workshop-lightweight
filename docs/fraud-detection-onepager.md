@@ -30,7 +30,7 @@ Every demo prompt is an end-to-end AML workflow:
 4. **Investigate geography** → Oracle Spatial `SDO_WITHIN_DISTANCE` on `merchants.location` / `branches.location` (e.g. merchants within 1500 km of Dubai) — the same engine a real geo-velocity review uses.
 5. **Pull the 360° view** → JSON Relational Duality Views: `get_document("account_dv", "7")` returns one JSON document joining account, branch, customer, cards, and transactions; `query_documents("account_dv", where=…)` filters flagged activity (e.g. all STRUCTURING in EUROPE).
 6. **Cross-reference the world** → `search_tavily` pulls live news (sanctions, fraud rings, bank actions) and joins it to on-book exposure via `run_sql`.
-7. **Work the queue autonomously** → notebook **Part 12** flips the direction of the demo: instead of asking questions, the harness builds the alert queue from `FINANCE`, assembles an evidence pack per alert, decides `ESCALATE` / `KYC_REVIEW` / `DISMISS` with a confidence and a written rationale, records every decision in `AGENT.AML_TRIAGE` and OAMP memory, and computes the impact on the bank. Guide: [`part-12-autonomous-aml-triage.md`](part-12-autonomous-aml-triage.md).
+7. **Work the queue autonomously** → notebook **Part 6** flips the direction of the demo: instead of asking questions, the harness builds the alert queue from `FINANCE`, assembles an evidence pack per alert, decides `ESCALATE` / `KYC_REVIEW` / `DISMISS` with a confidence and a written rationale, records every decision in `AGENT.AML_TRIAGE` and OAMP memory, and computes the impact on the bank. Guide: [`part-6-autonomous-aml-triage.md`](part-6-autonomous-aml-triage.md).
 
 ## The compliance boundary (what makes it a *bank* demo)
 

@@ -358,7 +358,7 @@ _DUALITY_VIEW_TABLES = {
 # Duality-view fallback
 # --------------------------------------------------------------------------- #
 # Oracle's JSON Relational Duality View engine cannot read a table that carries
-# more than one VPD / DBMS_RLS policy. Part 8's kernel-enforced identity puts
+# more than one VPD / DBMS_RLS policy. The kernel-enforced identity (docs/reference/deep-data-security.md) puts
 # two policies on FINANCE.ACCOUNTS (a region predicate + a balance mask), three
 # on FINANCE.CUSTOMERS, etc. The view DDL then *succeeds* but every SELECT fails
 # with ORA-40606 ("Table 'ACCOUNTS' does not have a primary or unique key") —

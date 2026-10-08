@@ -1,0 +1,32 @@
+[
+  {
+    "number": "4.1",
+    "svg": "fig-4.1-toolbox-flow.svg",
+    "caption": "Lane A runs once per tool; lane B on every turn. Both meet in the <code>toolbox</code> table."
+  },
+  {
+    "number": "4.2",
+    "svg": "fig-4.2-register.svg",
+    "caption": "What <code>@register</code> does to <code>tool_run_sql</code>. The highlighted parameter has a default, so the schema marks it optional."
+  },
+  {
+    "number": "5.1",
+    "svg": "fig-5.1-hierarchy.svg",
+    "caption": "Instruction hierarchy. Higher tiers win a conflict; the highlighted tier is the system prompt, and tier 4 is data only."
+  },
+  {
+    "number": "5.2",
+    "svg": "fig-5.2-summarize.svg",
+    "caption": "Schematic, not measured. Look at the break-even point: left of it the card costs more than the transcript, right of it less."
+  },
+  {
+    "number": "5.3",
+    "svg": "fig-5.3-agent-loop.svg",
+    "caption": "Control flow of <code>agent_turn</code> (TODO 9). Look at the highlighted branch on <code>msg.tool_calls</code>; the red path is the forced final answer."
+  },
+  {
+    "number": "5.4",
+    "svg": "fig-5.4-offload.svg",
+    "caption": "Schematic, not to scale. The prompt keeps a preview and a pointer; the full output stays in OAMP."
+  }
+]

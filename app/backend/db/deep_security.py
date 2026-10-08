@@ -28,7 +28,7 @@ available backend:
     APP_ONLY   Nothing installed at the database layer; only the Python
                post-filters in `api/identities.py` apply. The demo still works
                but the trust boundary is the application, which is exactly the
-               failure mode the notebook's Part 8 argues against.
+               failure mode docs/reference/deep-data-security.md argues against.
 
 Note on the Free edition: `DBMS_DEEP_SEC` is absent, every Deep Sec dictionary
 view is absent, and `CREATE DATA ROLE` / `CREATE END USER` / `CREATE DATA GRANT`
@@ -43,7 +43,7 @@ grants over the OAMP-managed `EDA_ONNX_*` tables, plus
 memory read and write. That layer needs the same Enterprise-class data roles
 and data grants the FINANCE layer needs, so on the Free edition it is reported,
 not installed — see `install_memory_policies()` and
-`docs/part-8-deep-data-security.md`.
+`docs/reference/deep-data-security.md`.
 
 The persona → end-user-name convention matches what `setup_advanced.py` already
 seeds: ``<persona id>@meridianbank.example``.

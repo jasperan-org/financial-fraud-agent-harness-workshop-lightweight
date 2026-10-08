@@ -1,9 +1,9 @@
-"""Periodic schema rescans via DBMS_SCHEDULER. Mirrors notebook §12.
+"""Periodic schema rescans via DBMS_SCHEDULER. Companion to the notebook's Part 2 scanner.
 
 Two pieces:
 
   1. `scan_history` table — bookkeeping for every scan the agent has run.
-     Created idempotently on app boot. The §5 scanner writes a row when
+     Created idempotently on app boot. The Part 2 scanner writes a row when
      it starts/finishes a scan.
 
   2. (opt-in) A `DBMS_SCHEDULER` job that calls a tiny PL/SQL procedure to

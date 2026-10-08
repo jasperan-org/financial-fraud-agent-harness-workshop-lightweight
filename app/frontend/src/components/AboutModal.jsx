@@ -113,7 +113,7 @@ export default function AboutModal({ open, onClose }) {
               redacted by clearance) and inside the agent loop, where the
               persona is stamped into the system prompt so the model can
               explain authorization-driven empty results. This mirrors the
-              Deep Data Security (DDS) pattern in the Part 8 guide (docs/part-8-deep-data-security.md).
+              Deep Data Security (DDS) pattern in the Deep Data Security reference (docs/reference/deep-data-security.md).
             </p>
           </section>
 

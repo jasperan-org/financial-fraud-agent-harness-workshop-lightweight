@@ -1,65 +1,48 @@
 # Workshop TODO checklist
 
-The canonical workshop is the nine-TODO path in `notebook_student.ipynb`, followed by the **Part 12 capstone** (autonomous AML triage — no TODO; it runs the harness you built). Each checkpoint is an assertion in the notebook: most sit in the cell right after their TODO. Exceptions: TODO 6 is verified together with TODO 7 (after `tool_run_sql`, which `retrieve_tools` must be able to find), TODO 8 at the end of its own cell (after the skillbox is populated), and TODO 9 checks the signature and that the stub is gone — the §7.3 demo then runs it for real. Every stub states its inputs, return shape, key Oracle call and its checkpoint. A failure identifies the unfinished block before later work depends on it.
+`notebook_student.ipynb` has nine TODOs: TODO 1 is an inline prompt, TODOs 2–9 are stubs. Each has one checkpoint cell that prints a single ✅/❌ line and fails on the stub, on trivial returns and on the obvious bug. Each stub's comment block holds its signature, steps and checkpoint. `Run All` is supposed to halt at the first unfinished TODO. Answers: `notebook_complete.ipynb`.
 
-- [ ] **TODO 1 — ask the bare model** in Part 1. Set `QUESTION` and run the chat client with no memory, retrieval, or tools.
-- [ ] **TODO 2 — `OracleONNXEmbedder.embed`** in Part 2. Embed text with the in-database ONNX model, one `VECTOR_EMBEDDING` SELECT per text.
-- [ ] **TODO 3 — `_scan_tables`** in Part 2. Read Oracle catalog metadata and emit `Fact` objects describing the Meridian Bank `FINANCE` tables.
-- [ ] **TODO 4 — `retrieve_knowledge`** in Part 3. Oversample OAMP memories, filter them, and rerank the useful candidates.
-- [ ] **TODO 5 — `hybrid_rrf_search_memories`** in Part 3. Fuse vector and Oracle Text ranks with Reciprocal Rank Fusion in one SQL statement.
-- [ ] **TODO 6 — `retrieve_tools`** in Part 6. Rank the `toolbox` by cosine distance to the query, rerank the shortlist, and merge the always-on tools.
-- [ ] **TODO 7 — `tool_run_sql`** in Part 6. Register a safe, read-only `SELECT`/`WITH` tool and return bounded JSON results.
-- [ ] **TODO 8 — `tool_list_skills`** in Part 6. Search the `skillbox` semantically and return top-k skills as JSON.
-- [ ] **TODO 9 — `agent_turn`** in Part 7. Assemble context, call the model, dispatch tools, enforce iteration/time limits, and produce a final answer.
+| TODO | Name | Section | Guide |
+|---|---|---|---|
+| 1 | `QUESTION`: ask the bare model | §1.3 | [part-1-setup.md](part-1-setup.md#todo-1-question) |
+| 2 | `recall_memories` | §2.2 | [part-2-oamp-memory.md](part-2-oamp-memory.md#todo-2-recall_memories) |
+| 3 | `_scan_tables` | §2.3 | [part-2-oamp-memory.md](part-2-oamp-memory.md#todo-3-_scan_tables) |
+| 4 | `retrieve_knowledge` | §3.2 | [part-3-retrieval.md](part-3-retrieval.md#todo-4-retrieve_knowledge) |
+| 5 | `hybrid_search_knowledge` | §3.3 | [part-3-retrieval.md](part-3-retrieval.md#todo-5-hybrid_search_knowledge) |
+| 6 | `retrieve_tools` | §4.1 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-6-retrieve_tools) |
+| 7 | `tool_run_sql` | §4.2 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-7-tool_run_sql) |
+| 8 | `tool_list_skills` | §4.4 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-8-tool_list_skills) |
+| 9 | `agent_turn` | §5.3 | [part-5-agent-loop.md](part-5-agent-loop.md#todo-9-agent_turn) |
 
-There is no tenth TODO for identity. The rule set is installed for you by `app/scripts/setup_deep_security.py`; **§6.7** in the notebook shows what it enforces (the same three queries under five end users), and [Part 8](part-8-deep-data-security.md) is the full guide.
+Part 6 ([guide](part-6-autonomous-aml-triage.md)) has no TODO: it runs the harness you built.
 
 ## Before you start
 
-- [ ] **§0.1 in the notebook: kernel self-check.** Green print = you are on the Python 3.11 workshop kernel and the notebook can see the repository.
-- [ ] **§1.3 in the notebook: database preflight.** Green on FINANCE, the ONNX embedder, and the LLM key. Every red row prints its own fix command; the cell stops you if `FINANCE` or the embedder is missing.
-- [ ] Codespace or local Oracle is reachable.
-- [ ] `ALL_MINILM_L12_V2` is available in the database (and `RERANKER_ONNX` if the cross-encoder step is provisioned).
-- [ ] The `FINANCE` schema is seeded (see `app/scripts/seed.py`).
-- [ ] The identity rules are installed (see `app/scripts/setup_deep_security.py`); the Codespace runs this for you during setup.
-- [ ] The notebook kernel has the dependencies from `requirements.txt`.
-- [ ] `notebook_student.ipynb` opens from the repository root.
+- [ ] Oracle is reachable and the `FINANCE` schema is seeded (`app/scripts/seed.py`).
+- [ ] `ALL_MINILM_L12_V2` is loaded (and `RERANKER_ONNX` if the cross-encoder is provisioned).
+- [ ] The identity rules are installed (`app/scripts/setup_deep_security.py`); the Codespace does this during setup.
+- [ ] The kernel is the Python 3.11 workshop kernel with the packages from `requirements.txt`.
+- [ ] §1.2 preflight is green. Each ❌ row prints its own fix; only a missing `FINANCE` or embedder stops the notebook.
 
 ## After the nine TODOs
 
-- [ ] Run the three-turn notebook demo on one thread (discovery → live SQL → correction).
-- [ ] Open the running app at `http://localhost:3000`.
+- [ ] Run the three-turn demo in §5.4 (discovery, live SQL, correction).
+- [ ] Open the app at `http://localhost:3000`.
 - [ ] Ask *"Which branch regions have the most FLAGGED or BLOCKED transactions?"*
-- [ ] Switch the header persona to **Analyst — Europe & Middle East** and re-ask; watch the rows change.
-- [ ] Open the memory pane and confirm the correction from turn 3 is there.
-- [ ] Switch the header persona to **Compliance Officer** and ask for Suspicious Activity Reports: **all of them** (117 in the seed; the §1.3 preflight prints the count). Switch to **Analyst (default)** and ask the same thing: **0** rows. Nothing in the UI changed — the database answered differently.
+- [ ] Switch the header persona to **Analyst — Europe & Middle East** and re-ask; the rows change.
+- [ ] Open the memory pane and confirm the turn-3 correction is there.
+- [ ] As **Compliance Officer**, ask for Suspicious Activity Reports: all rows. As **Analyst (default)**, ask again: no rows. The database answered differently; nothing in the UI changed.
 
-## The capstone — Part 12, autonomy
+## Part 6 (capstone)
 
-No TODO here: Part 12 runs the harness you just built as an AML triage desk. Work it in order.
+- [ ] §6.1: read the ledger DDL and build the queue. The cell prints the alerts in the window and the ones it will work (`TRIAGE_LIMIT`).
+- [ ] §6.2: read one evidence pack, then the policy and the validator. Unknown decisions become `REVIEW_REQUIRED`.
+- [ ] §6.3: run the triage; read the tool trace and the ledger rows.
+- [ ] §6.4: read the impact board (the only assumption is `MANUAL_MINUTES_PER_ALERT`), then ask the agent about its own decisions.
+- [ ] Set `IGNORE_WATERMARK = False` and re-run §6.1: a scheduled job reports no new alerts instead of re-triaging the book.
 
-- [ ] §12.2 — read the ledger DDL. `AGENT.AML_TRIAGE` is the structured decision record (one row per `(customer, typology)`); the harness owns it, never `FINANCE`.
-- [ ] §12.3 — build the alert queue. The cell prints how many alerts the 30-day window holds and the three it will work (`TRIAGE_LIMIT = 3`); `IGNORE_WATERMARK = False` makes the next run incremental.
-- [ ] §12.4 — read one evidence pack line by line. That is everything the model will see.
-- [ ] §12.5 — read the policy and the validator. Unknown decisions become `REVIEW_REQUIRED`; unknown reason codes fall back to the alert's typology.
-- [ ] §12.7 — run the triage. Watch the tool trace, then read the ledger rows.
-- [ ] §12.8 — read the impact board. The only assumption is `MANUAL_MINUTES_PER_ALERT`; everything else is computed from the database.
-- [ ] §12.9 — ask the agent about its own morning. The answer comes from `case_decision` memories, not fresh SQL.
-- [ ] §12.10 — decide what you would schedule. Set `IGNORE_WATERMARK = False` and re-run §12.3: a real morning job reports **0 new alerts** rather than re-triaging the book.
+## Reference material
 
-Guide: [Part 12 — Autonomous AML triage](part-12-autonomous-aml-triage.md).
+Not in the notebook; read as needed: [DBFS](reference/dbfs.md) · [Oracle MLE](reference/mle.md) · [Deep Data Security](reference/deep-data-security.md) · [duality views](reference/duality-views.md) · [tool-output offload](reference/tool-output-offload.md) (the notebook shows offload in §5.5).
 
-## Advanced reference material
-
-Parts 4 (DBFS scratchpad), 5 (Oracle MLE), 8 (identity-aware data access), 9 (JSON Relational Duality Views), and 11 (tool-output offload) are **not** required TODOs in the 90-minute path, and their guides go deeper than the notebook:
-
-- **[§2.6 in the notebook](../notebook_student.ipynb)** — the rest of the OAMP surface: memory types, relations (retire vs keep), one-hop traversal, retention.
-- **[§3.6 in the notebook](../notebook_student.ipynb)** — the same embeddings and the same three retrieval legs through `langchain-oracledb` (`OracleEmbeddings`, `OracleVS`, `OracleTextSearchRetriever`). Guide: [Part 3 § LangChain](part-3-retrieval.md#the-same-three-legs-from-langchain--langchain-oracledb).
-- **[§6.6 in the notebook](../notebook_student.ipynb)** — Oracle MLE (`exec_js`), Oracle Spatial (`merchants_near`), duality views (`account_document`). Guides: [Part 5](part-5-mle.md), [Part 9](part-9-duality-views.md).
-- **[§6.7 in the notebook](../notebook_student.ipynb)** — identity: the same query under five end users, enforced by the kernel. Guide: [Part 8](part-8-deep-data-security.md).
-- **[§7.4 in the notebook](../notebook_student.ipynb)** — tool-output offload with retention on the offloaded rows. Guide: [Part 11](part-11-tool-output-offload.md).
-- **The DBFS concept check in the notebook** (after §7.3) — write a draft, read it back through a second connection. Guide: [Part 4](part-4-dbfs.md).
-
-- [`notebook_complete.ipynb`](../notebook_complete.ipynb) — the same notebook with every TODO solved (and its outputs saved, so it reads top to bottom without a run).
-
-To deploy this harness against an Oracle that isn't the workshop Codespace, run the same provisioning the Codespace runs: `cd app && python scripts/bootstrap.py && python scripts/seed.py && python scripts/setup_advanced.py && python scripts/setup_deep_security.py` — in that order (`seed.py` drops and recreates `FINANCE`, so `setup_deep_security.py` must follow it; `provision.sh` sequences all four and is safe to re-run), all explained in [`part-1-setup.md`](part-1-setup.md).
+To deploy against an Oracle that is not the workshop Codespace, run the same provisioning the Codespace runs: `cd app && python scripts/bootstrap.py && python scripts/seed.py && python scripts/setup_advanced.py && python scripts/setup_deep_security.py`, in that order (`seed.py` drops and recreates `FINANCE`, so `setup_deep_security.py` must follow). `provision.sh` sequences all four and is safe to re-run. See [part-1-setup.md](part-1-setup.md).

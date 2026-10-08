@@ -1,6 +1,6 @@
 """Bank / AML schema + spatial setup + seed data + JSON duality views.
 
-Mirrors the notebook's Part 5.4 + Part 11.6 cells, condensed into a single
+Mirrors the notebook's FINANCE seed, condensed into a single
 re-runnable function. Idempotent: re-running drops and re-creates objects with
 the same content.
 
@@ -10,7 +10,7 @@ four regions (AMERICAS, EUROPE, MIDDLE_EAST, ASIA_PACIFIC), 2,000 customers
 last 90 days (including deliberate AML patterns: structuring, geographic
 velocity, high-risk-corridor wires, rapid cash-out, large cash deposits),
 900 loans and ~120 Suspicious Activity Reports (SAR_REPORTS — the
-compliance-only table that drives the Part 8 identity demo).
+compliance-only table that drives the identity demo).
 
 Alongside the core banking tables the schema carries the operational paperwork
 an AML desk actually reads: SANCTIONS_SCREENINGS (watchlist name matches),
@@ -211,12 +211,12 @@ DDL = [
          CONSTRAINT fx_rates_pk PRIMARY KEY (rate_date, currency)
        )""",
     "COMMENT ON COLUMN transactions.amount_cents IS 'Transaction amount in USD CENTS, never dollars; divide by 100 for dollars.'",
-    "COMMENT ON COLUMN transactions.region IS 'Denormalized home-branch region of the transacting account; drives the Part 8 DDS row policy.'",
+    "COMMENT ON COLUMN transactions.region IS 'Denormalized home-branch region of the transacting account; drives the DDS row policy.'",
     "COMMENT ON COLUMN transactions.flag_reason IS 'Reason the AML rules flagged or blocked this transaction (STRUCTURING, GEO_VELOCITY, HIGH_RISK_COUNTRY, RAPID_CASH_OUT, LARGE_CASH_DEPOSIT).'",
     "COMMENT ON COLUMN accounts.balance_cents IS 'Current balance in USD CENTS, never dollars; divide by 100 for dollars.'",
     "COMMENT ON COLUMN customers.risk_rating IS '1-100 customer risk score; higher means riskier.'",
     "COMMENT ON TABLE transactions IS 'Card/account transactions; status FLAGGED or BLOCKED indicates an AML rule hit with flag_reason set.'",
-    "COMMENT ON TABLE sar_reports IS 'Suspicious Activity Reports; compliance-only, restricted by the Part 8 DDS policies.'",
+    "COMMENT ON TABLE sar_reports IS 'Suspicious Activity Reports; compliance-only, restricted by the DDS policies.'",
     "COMMENT ON TABLE branches IS 'Bank branches worldwide; location is SDO_GEOMETRY (WGS84, SRID 8307).'",
     "COMMENT ON TABLE merchants IS 'Merchants where card transactions occur; location is SDO_GEOMETRY (WGS84, SRID 8307).'",
     "COMMENT ON TABLE sanctions_screenings IS 'Watchlist screening results: OFAC / EU / UN / PEP / adverse-media name matches with a reviewer disposition.'",

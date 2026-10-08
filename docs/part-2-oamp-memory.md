@@ -18,55 +18,47 @@ We **do** keep one bespoke table — `scan_history`. It records *that* a scan ra
 
 ## How OAMP Is Wired Up
 
-The setup cell wires OAMP with three things you'll see referenced in the Python code (the embedder is implemented in TODO 2, defined just above it):
+§2.1 builds the client:
 
 ```python
 memory_client = OracleAgentMemory(
     connection=agent_conn,                            # AGENT-owned schema
-    embedder=OracleONNXEmbedder(agent_conn),          # in-DB ONNX from §1 — no network
-    llm=extraction_llm,                               # same chat provider/model as §1
+    llm=extraction_llm,                               # same chat provider/model as Part 1
+    memory_store_id="EDA_ONNX",                       # names the EDA_ONNX_* managed tables
+    embedder=OracleDBEmbedder(agent_conn, model="ALL_MINILM_L12_V2", embedding_dimension=384),
     memory_extraction_config=MemoryExtractionConfig(extract_memories=True),  # mine durable facts
     schema_policy="create_if_necessary",              # OAMP owns its DDL
-    memory_store_id="EDA_ONNX",                       # names the EDA_ONNX_* managed tables
 )
 ```
 
-Three things to notice:
+- **`agent_conn`**: OAMP-managed tables live in the `AGENT` schema, not `SYS`.
+- **`OracleDBEmbedder`**: runs `VECTOR_EMBEDDING(ALL_MINILM_L12_V2 ...)` in the database. No network call for embedding.
+- **`extraction_llm`**: the chat model OAMP uses to extract durable memories from threads and keep a rolling summary.
+- **`schema_policy="create_if_necessary"`**: OAMP creates `EDA_ONNX_MEMORY`, `EDA_ONNX_THREAD`, `EDA_ONNX_RECORD_CHUNKS` and the rest on first use.
 
-1. **`agent_conn`** — OAMP-managed tables live in the `AGENT` schema, not `SYS`.
-2. **`OracleONNXEmbedder`** — wraps `SELECT VECTOR_EMBEDDING(ALL_MINILM_L12_V2 USING :t AS DATA) FROM dual`. Every embed call is a SQL statement on `agent_conn`. Zero network calls for embedding.
-3. **`extraction_llm`** — OAMP uses the same chat model your agent uses to extract durable memories from threads and maintain a rolling summary.
+## TODO 2: `recall_memories`
 
-`schema_policy="create_if_necessary"` means OAMP creates `EDA_ONNX_MEMORY`, `EDA_ONNX_THREAD`, `EDA_ONNX_RECORD_CHUNKS`, etc. on first use. You never write DDL for memory tables. `memory_store_id` is the naming form OAMP >= 26.6 introduced (the older `table_name_prefix="eda_onnx_"` resolved to the same object names and is removed in 27.1). The workshop requires `oracleagentmemory>=26.8`: that release also adds database-native Deep Data Security for this store — see [Part 8](part-8-deep-data-security.md).
+§2.2. OAMP stores a fact with `add_memory` and finds it by meaning with `search`. Wrap `search` in `recall_memories(query, k=3, kind=None)` so later parts call one function.
 
-## TODO 2: Implement `OracleONNXEmbedder.embed`
-
-OAMP calls the embedder on every write (`add_memory`) and every search, so this method is the vector path for all of long-term memory. The class inherits from OAMP's `IEmbedder`; only `embed` is yours, and `embed_async` delegates to it.
-
-**Your job:** for each text, run one in-database embedding and pack the results into a float32 array of shape `(len(texts), ONNX_EMBED_DIM)`:
-
-```sql
-SELECT VECTOR_EMBEDDING(ALL_MINILM_L12_V2 USING :t AS DATA) FROM dual
-```
+Steps: call `memory_client.search(query, user_id=USER_ID, agent_id=AGENT_ID, record_types=["memory"], metadata_filter=..., max_results=k)`; the filter is `{"kind": kind}` when `kind` is given, else `None`; return one dict per hit with `id`, `kind`, `subject`, `body`, `distance`.
 
 **Solution:**
 
 ```python
-    def embed(self, texts, *, is_query=False):
-        out = np.zeros((len(texts), self._dim), dtype=np.float32)
-        sql = f"SELECT VECTOR_EMBEDDING({self._model} USING :t AS DATA) FROM dual"
-        with self._conn.cursor() as cur:
-            for i, t in enumerate(texts):
-                cur.execute(sql, t=t)
-                out[i] = np.asarray(list(cur.fetchone()[0]), dtype=np.float32)
-        return out
+def recall_memories(query, k=3, kind=None):
+    hits = memory_client.search(
+        query, user_id=USER_ID, agent_id=AGENT_ID, record_types=["memory"],
+        metadata_filter={"kind": kind} if kind else None, max_results=k)
+    return [{"id": h.id, "kind": (h.metadata or {}).get("kind"),
+             "subject": (h.metadata or {}).get("subject"),
+             "body": h.content, "distance": h.distance} for h in hits]
 ```
 
-There is no network hop and no Python-side model: every vector is computed by the database, and the checkpoint at the end of the cell probes it before the memory client is built.
+The checkpoint stores one AML fact (`AMOUNT_CENTS` is in USD cents) and recalls it with a question that shares no words with it. It fails if the stub is unimplemented, returns nothing, or drops `user_id` / `agent_id`.
 
 ## OAMP user and agent IDs (auto-registered)
 
-Every memory record OAMP stores carries a `user_id` (the operator) and an `agent_id` (which agent wrote it). The pre-built `build_memory_client` call in the notebook (`memory_client = OracleAgentMemory(...)`) registers these IDs idempotently — you don't need a separate registration step. The IDs `enterprise-operator` and `enterprise-data-agent` are wired through the rest of the harness.
+Every memory record OAMP stores carries a `user_id` (the operator) and an `agent_id` (which agent wrote it). `register_user_and_agent` (§2.1) registers these IDs idempotently. The IDs `enterprise-operator` and `enterprise-data-agent` are wired through the rest of the harness.
 
 ## The Schema Scanner: Catalog Views as Training Data
 
@@ -92,11 +84,11 @@ class Fact:
     metadata: dict   # owner, table, column, etc.
 ```
 
-## TODO 3: Implement `_scan_tables`
+## TODO 3: `_scan_tables`
 
-This is the simplest of the four scanners — and it's the right place to learn the pattern. It mines `ALL_TABLES` joined with `ALL_TAB_COMMENTS` and emits one `Fact(kind="table")` per table.
+§2.3. This is the simplest of the four scanners — and it's the right place to learn the pattern. It mines `ALL_TABLES` joined with `ALL_TAB_COMMENTS` and emits one `Fact(kind="table")` per table.
 
-**The query you need to run:**
+**The query (provided as `TABLES_SQL`):**
 
 ```sql
 SELECT t.table_name, tc.comments, t.num_rows, t.last_analyzed
@@ -117,17 +109,9 @@ Concatenate the parts conditionally — skip the comment line if there's no comm
 
 ```python
 def _scan_tables(conn, owner: str) -> list[Fact]:
-    sql = (
-        "SELECT t.table_name, tc.comments, t.num_rows, t.last_analyzed "
-        "  FROM all_tables t "
-        "  LEFT JOIN all_tab_comments tc "
-        "    ON tc.owner = t.owner AND tc.table_name = t.table_name "
-        " WHERE t.owner = :owner "
-        " ORDER BY t.table_name"
-    )
     facts: list[Fact] = []
     with conn.cursor() as cur:
-        cur.execute(sql, owner=owner.upper())
+        cur.execute(TABLES_SQL, owner=owner.upper())
         for table, comment, num_rows, last_analyzed in cur:
             body_parts = [f"Table {owner}.{table}."]
             if comment:
@@ -150,7 +134,7 @@ def _scan_tables(conn, owner: str) -> list[Fact]:
     return facts
 ```
 
-The other three scanners (`_scan_columns`, `_scan_relationships`, `_scan_workload`) follow the same pattern and are pre-built — read them after you finish this TODO and notice how each one converts a different catalog view into the same `Fact` shape.
+The other three scanners (`scan_columns`, `scan_relationships`, and the `V$SQL` workload scanner) follow the same pattern and are pre-built — read them in `workshop/memory.py` after you finish this TODO and notice how each one converts a different catalog view into the same `Fact` shape.
 
 ## How Facts Become Memories
 
@@ -174,13 +158,9 @@ Two store behaviours are worth knowing before you read the counters:
 - **The same body can exist in more than one record.** With `MemoryExtractionConfig(extract_memories=True)`
   the extractor re-materialises a memory it rewrites and retires the record it came from, so a long-lived
   workspace accumulates historical records for one fact. The upsert above keeps *one current* record per
-  `(kind, subject)`; §3.6's LangChain mirror de-duplicates by body for exactly this reason.
+  `(kind, subject)`; Part 3 de-duplicates by body for exactly this reason.
 
-> **First run on a fresh seed takes a couple of minutes.** The Meridian Bank schema has 15 tables,
-> ~120 columns and their relationships, so the first scan writes ~160 memories — and each new
-> memory is an embed plus an extraction round-trip. Re-runs are seconds, because every body hash
-> matches and the loop skips the expensive path. (The `FINANCE` world is deliberately wide: fifteen
-> tables, not three, is what makes "which table holds this?" a real retrieval problem.)
+> **Note** The first scan embeds every fact and makes an extraction round-trip per memory, so it takes minutes. Re-runs take seconds: every body hash matches and the loop skips the expensive path.
 
 ## Relations and Links (OAMP >= 26.8)
 
@@ -223,12 +203,11 @@ for r in results:
 The workshop uses links in four places:
 
 - **The scanner graph (`run_scan`)** — `link_schema_facts()` links every column and relationship fact to its table fact with `supports`, so one hit on `FINANCE.TRANSACTIONS` brings its columns along.
-- **`remember(supersedes=...)`** — the agent corrects a fact by memory id or by phrase; the old fact is retired (notebook §6.3).
-- **`link_memories(source, target, link_type)`** — connects two facts the agent already knows; `supports` / `contradicts` keep both current (notebook §6.3).
-- **`search_knowledge(follow_links=True)`** — the app's variant: adds one hop of linked context to every hit (`app/backend/agent/tools.py`). In the notebook the same traversal is two lines: `memory_client.search(..., num_hops=1, max_linked_results=…)` (§2.6).
+- **`remember(supersedes=...)`** — the agent corrects a fact by memory id or by phrase; the old fact is retired (§4.3).
+- **`link_memories(source, target, link_type)`** — connects two facts the agent already knows; `supports` / `contradicts` keep both current (§4.3).
+- **`search_knowledge(follow_links=True)`** — the app's variant: adds one hop of linked context to every hit (`app/backend/agent/tools.py`). The same traversal is `memory_client.search(..., num_hops=1, max_linked_results=…)`.
 
-The notebook's §2.6 demonstrates the four pieces the harness does not otherwise touch — memory types
-(`guideline` / `preference`), relations, hop traversal, and retention (`ttl_days` → `EXPIRES_AT`).
+The notebook links scanner facts (§2.4); relation types, hop traversal, memory types (`guideline` / `preference`) and retention (`ttl_days` → `EXPIRES_AT`) are reference material here, used by the app.
 
 The right-side Memory Context pane renders relations as `→ relation` / `← relation` chips under each
 memory, with retired ones struck through.
@@ -243,7 +222,7 @@ memory, with retired ones struck through.
 
 ## Troubleshooting
 
-**`ValueError: user already exists`** — OAMP's `add_user` and `add_agent` reject duplicate IDs. The pre-built `memory_client` initialisation in §2.2 wraps these calls in `try/except ValueError`, but if you call them yourself, do the same.
+**`ValueError: user already exists`** — OAMP's `add_user` and `add_agent` reject duplicate IDs. `register_user_and_agent` (§2.1) wraps these calls in `try/except ValueError`, but if you call them yourself, do the same.
 
 **`ORA-00942: table or view does not exist`** — `ALL_TABLES` etc. are catalog views every user can read. If you see this, you're probably querying as a user without `SELECT_CATALOG_ROLE` (the setup cell granted it).
 

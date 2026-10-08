@@ -7,7 +7,7 @@ ONNX, DBFS, vector pool) or seed (FINANCE, duality views, skillbox):
      (required for the Part 3 hybrid RRF retrieval).
   2. DDS / DBMS_RLS row policy on FINANCE.transactions (filters by region)
      and column mask on FINANCE.transactions.amount_cents
-     (Part 8 — identity-aware authorization).
+     (identity-aware authorization).
   3. AGENT_REQUEST_SCAN procedure + DBMS_SCHEDULER job + scan_history table
      (Part 10 — continuous scans).
 

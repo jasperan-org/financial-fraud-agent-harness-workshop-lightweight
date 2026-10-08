@@ -1,7 +1,7 @@
 """The captured Grok triage run the replay is built from.
 
 The workshop cannot spend live Grok tokens on an autonomous AML loop, so the
-desk replays ONE real run: `notebook_complete.ipynb` §12.6-12.9 (executed
+desk replays ONE real run: `notebook_complete.ipynb` §6.3-6.4 (executed
 2026-09-29 04:18-04:31 UTC) plus the `AGENT.AML_TRIAGE` rows it wrote. Every
 rationale, confidence, next action and answer line below is verbatim from that
 run — the numbers the model quoted are the numbers in the capture, and nothing
@@ -21,7 +21,7 @@ captured model call; TOTALS therefore says 3 alerts / 6 calls, not 4/8.
 
 CAPTURED_AT = "2026-09-29T04:18:00Z"
 MODEL = "xai.grok-4.3 (OCI GenAI)"
-SOURCE = "notebook_complete.ipynb §12.6-12.9 + AGENT.AML_TRIAGE"
+SOURCE = "notebook_complete.ipynb §6.3-6.4 + AGENT.AML_TRIAGE"
 
 # The metered sweep's own headline numbers — the yardstick the replay is
 # measured against (see `captured_seconds` in the sweep totals).
@@ -239,7 +239,7 @@ RUNS = [
 ]
 
 # --------------------------------------------------------------------------- #
-# §12.9 — the desk asks its own memory what it did. One model round-trip, no
+# §6.4 — the desk asks its own memory what it did. One model round-trip, no
 # tools, 0 tokens metered; the answer is verbatim.
 # --------------------------------------------------------------------------- #
 

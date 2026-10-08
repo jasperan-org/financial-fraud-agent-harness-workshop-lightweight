@@ -1,11 +1,11 @@
 """AML triage replay — the desk's morning, re-driven from a real captured run.
 
 The workshop cannot spend live Grok tokens on an autonomous AML loop, so this
-module replays ONE genuine run (`agent/aml_capture.py`, notebook §12.6-12.9)
+module replays ONE genuine run (`agent/aml_capture.py`, notebook §6.3-6.4)
 step by step over Socket.IO, wall-clock scaled by `AML_REPLAY_SPEED`, and
 records every decision in AGENT.AML_REPLAY.
 
-The queue is never hardcoded. It is the notebook's §12.3 aggregation run against
+The queue is never hardcoded. It is the notebook's §6.1 aggregation run against
 the live FINANCE schema — one row per (customer, AML typology), newest activity
 first — so the desk keeps working whatever the live feed just inserted. Alerts
 whose (customer_id, typology) has a capture replay that capture verbatim; every
@@ -46,7 +46,7 @@ from db.connection import connect_agent
 # in seconds. Reported in `aml_status` so the UI can say how fast it is running.
 SPEED = float(os.environ.get("AML_REPLAY_SPEED", "1"))
 
-LOOKBACK_DAYS = 30          # the alert window the notebook's §12.3 queue uses
+LOOKBACK_DAYS = 30          # the alert window the notebook's §6.1 queue uses
 DEFAULT_LIMIT = 3           # alerts per sweep, mirroring TRIAGE_LIMIT
 MAX_LIMIT = 12              # keep one sweep bounded regardless of what the client asks
 CONTEXT_MS = 400            # the evidence pack has no capture; this is its nominal cost
@@ -69,7 +69,7 @@ MODEL_LABEL = "model call · xai.grok-4.3"
 FALLBACK_MODEL_LABEL = "model call · not captured"
 CONTEXT_LABEL = "evidence pack · assembled from FINANCE"
 
-# The harness's own fallback (notebook §12.5): the decision vocabulary and the
+# The harness's own fallback (notebook §6.2): the decision vocabulary and the
 # wording a REVIEW_REQUIRED row carries when no validated model reply exists.
 FALLBACK_DECISION = {
     "decision": "REVIEW_REQUIRED",
@@ -78,7 +78,7 @@ FALLBACK_DECISION = {
     "recommended_next_action": "Human review of the alert.",
 }
 
-# Same rule texts the notebook's §12.4 evidence pack prints under RULE.
+# Same rule texts the notebook's §6.2 evidence pack prints under RULE.
 TYPOGRAPHY = {
     "STRUCTURING": "$10,000 CTR threshold - deposits split just under it, repeated in a short window.",
     "GEO_VELOCITY": "Impossible travel - one card, far-apart regions, hours apart (card cloning / takeover).",
@@ -149,7 +149,7 @@ _state: dict = {
     "conn": None,
     "owns_conn": False,     # False while we are borrowing the app's agent connection
     "running": False,       # a sweep is in flight
-    "recalling": False,     # §12.9's memory recall is in flight
+    "recalling": False,     # §6.4's memory recall is in flight
     "last": None,           # the last finished sweep, for aml_status
 }
 
@@ -185,7 +185,7 @@ def _reset_conn() -> None:
 
 
 def _rows(sql: str, **binds) -> list[dict]:
-    """Run SQL and return list[dict] with lowercased column names (notebook §12.2)."""
+    """Run SQL and return list[dict] with lowercased column names (notebook §6.1)."""
     with _conn().cursor() as cur:
         cur.execute(sql, **binds)
         cols = [d[0].lower() for d in cur.description]
@@ -223,7 +223,7 @@ def _clamp_limit(value, default: int = DEFAULT_LIMIT) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# The alert queue (§12.3, newest first)
+# The alert queue (§6.1, newest first)
 # --------------------------------------------------------------------------- #
 
 def _queue_alert(row: dict) -> dict:
@@ -318,7 +318,7 @@ def _queue_payload(alert: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# The evidence pack (§12.4)
+# The evidence pack (§6.2)
 # --------------------------------------------------------------------------- #
 
 def evidence_pack(alert: dict, max_txns: int = 8) -> str:
@@ -409,7 +409,7 @@ def evidence_pack(alert: dict, max_txns: int = 8) -> str:
 
 def ensure_ledger(conn) -> None:
     """Create the replay ledger on first boot (idempotent), mirroring the
-    notebook's §12.2 ledger cell. One row per alert per sweep; the genuine
+    notebook's §6.1 ledger cell. One row per alert per sweep; the genuine
     capture in AGENT.AML_TRIAGE is deliberately never written to."""
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = :1", [LEDGER_TABLE])
@@ -633,7 +633,7 @@ def _sweep(limit: int) -> None:
 
 
 def _recall() -> None:
-    """Replay §12.9: the desk asks its own memory what it decided."""
+    """Replay §6.4: the desk asks its own memory what it decided."""
     capture = aml_capture.RECALL
     run_id = f"recall-{uuid.uuid4().hex[:8]}"
     _state["recalling"] = True

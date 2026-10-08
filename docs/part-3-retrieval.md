@@ -1,19 +1,25 @@
-# Part 3: Retrieval Strategies
+# Part 3: Retrieval with langchain-oracledb
 
-Tables are storage. Retrieval is what makes them useful. This Part builds the read path on top of the OAMP store from Part 2 — and tests each layer in isolation before we plug it into the agent loop.
+Stored knowledge helps only if the agent can find it again. This Part builds the read path in three steps: a vector store over AML notes and OAMP memories (§3.1), vector search plus cross-encoder rerank (§3.2), and hybrid search with Reciprocal Rank Fusion (§3.3).
 
-## The Two Retrieval Surfaces
+## The two retrieval surfaces
 
-| Layer | What it gives you | When to use |
+| Layer | Strong on | Example |
 |---|---|---|
-| **Vector search** | Cosine similarity over embedded memories. Strong on *meaning*. | "Where do we store transaction amounts?" |
-| **Hybrid (vector + Oracle Text + RRF)** | Vector and full-text combined via Reciprocal Rank Fusion. Strong on both *meaning* and *exact tokens*. | "amount_cents in cents" — semantic concept + precise unit |
+| **Vector + rerank** | meaning | "Where do we store transaction amounts?" |
+| **Hybrid (vector + Oracle Text, fused with RRF)** | meaning and exact tokens | "which column holds RATE_BP" |
 
-Both run server-side. No round-trips to a separate vector DB. No Python embedder. No second service.
+Both run in the database. No separate vector DB, no Python embedder.
+
+## The knowledge store (§3.1)
+
+The agent searches one table, `AML_KNOWLEDGE_VS`, managed by `OracleVS`. `OracleEmbeddings` calls the same in-database ONNX model as OAMP (`ALL_MINILM_L12_V2`, 384 dimensions), so both share one vector space. The table holds the AML policy notes in `workshop/aml_knowledge.py` plus the valid OAMP memories written as facts (with a `kind` and a `subject`); chat extractions and `tool_output` records are left out. OAMP stays the source of truth: each row reuses its OAMP record id, `sync_knowledge` upserts new or changed rows and deletes stale ones, and `mirror_writes` makes later `write_facts` calls update the table too.
+
+§3.1 also creates an HNSW index and an Oracle Text index (`AML_KNOWLEDGE_TEXT_IDX`) on the table, and `make_reranker` returns `rerank(query, candidates, top_k, content_key)`, the in-database cross-encoder (`PREDICTION(RERANKER_ONNX ...)`). With no `RERANKER_ONNX` model loaded it keeps the vector order.
 
 ## The FINANCE Demo Schema
 
-The pre-built setup cell creates a `FINANCE` schema with fifteen tables and realistic data:
+`app/scripts/seed.py` creates the `FINANCE` schema with these tables (approximate seed sizes):
 
 | Table | Rows (approx) | What it represents |
 |---|---|---|
@@ -37,235 +43,87 @@ Two columns are intentionally surprising — these are exactly the kind of facts
 - **`transactions.amount_cents`** is in USD cents, not dollars.
 - **`customers.risk_rating`** is a 1-100 score, higher means riskier.
 
-The scanner picks both up via `COMMENT ON COLUMN`. Watch for them in §4's correction demo.
+The scanner picks both up via `COMMENT ON COLUMN`. Part 2 scans them into memory.
 
-The seed cell is **pre-built** — you don't need to look at the DDL or the inserts to do the workshop. Read the `COMMENT ON TABLE` / `COMMENT ON COLUMN` block at the bottom of the seed cell if you want to see what a domain expert's mental model looks like in SQL.
+The seed is pre-built; read the `COMMENT ON TABLE` / `COMMENT ON COLUMN` block in `seed.py` to see the domain model in SQL.
 
-## TODO 4: Implement `retrieve_knowledge`
+## TODO 4: `retrieve_knowledge`
 
-`retrieve_knowledge(query, k, kinds=None)` is a two-stage call that the agent loop will use on every turn:
+§3.2. Oversample by 4x so the reranker has candidates to reorder, then rerank down to `k`.
 
-1. **Cosine search** — `memory_client.search(...)` returns `k * 4` candidates ordered by vector distance.
-2. **Cross-encoder rerank** — those candidates run through `rerank(...)`, which scores every `(query, document)` pair in the database with `PREDICTION(RERANKER_ONNX USING :q AS DATA1, doc AS DATA2)` when the reranker is loaded (`app/backend/db/reranker_setup.py`; §1.3's preflight reports whether it is). When no reranker is loaded, `rerank` is a pass-through that just slices to top-k — the call site is unchanged either way.
-
-We **filter out** memories with `metadata.kind == "tool_output"` so the log of past tool calls doesn't pollute knowledge retrieval.
-
-**Why oversample by 4×?** The reranker is only as good as the candidate set you give it. Asking the cosine retriever for `k * 4` rows gives the cross-encoder enough signal to do meaningful reordering.
+Steps: split a `"a,b"` string `kinds` into a list and build the filter `{"kind": {"$in": kinds}}` (no filter when `kinds` is empty); fetch `k * 4` pairs from `knowledge_vs.similarity_search_with_score(query, k=k * 4, filter=...)`; turn each pair into a hit with `to_hit(doc, distance=float(dist))`; return `rerank(query, candidates, top_k=k, content_key="body")`.
 
 **Solution:**
 
 ```python
 def retrieve_knowledge(query: str, k: int = 5,
                        kinds: list[str] | None = None) -> list[dict]:
-    """Semantic search over the agent's long-term memory."""
-    # Defensive: LLMs sometimes pass `kinds` as a comma-separated string.
     if isinstance(kinds, str):
         kinds = [s.strip() for s in kinds.split(",") if s.strip()]
-    if kinds == []:
-        kinds = None
-
-    # Stage 1: oversample by 4× so the reranker has signal to chew on.
-    cosine_fetch = k * 4
-    hits = memory_client.search(
-        query,
-        user_id=USER_ID, agent_id=AGENT_ID,
-        record_types=["memory"],
-        max_results=cosine_fetch,
-    )
-
-    candidates: list[dict] = []
-    for h in hits:
-        meta = h.metadata or {}
-        kind_value = meta.get("kind")
-        # Drop tool-output memories from knowledge retrieval.
-        if kind_value == "tool_output":
-            continue
-        if kinds is not None and (kind_value is None or kind_value not in kinds):
-            continue
-        candidates.append({
-            "kind":     kind_value or "?",
-            "subject":  meta.get("subject", ""),
-            "body":     h.content,
-            "metadata": meta,
-            "distance": float(h.distance),
-        })
-
-    # Stage 2: cross-encoder rerank (in-DB if loaded; otherwise pass-through).
+    flt = {"kind": {"$in": kinds}} if kinds else None
+    hits = knowledge_vs.similarity_search_with_score(query, k=k * 4, filter=flt)
+    candidates = [to_hit(doc, distance=float(dist)) for doc, dist in hits]
     return rerank(query, candidates, top_k=k, content_key="body")
 ```
 
-After you implement it, the next cell scans `FINANCE` and runs a probe query — you should see hits like:
+Each hit has `kind`, `subject`, `body`, `metadata` and `distance`. The checkpoint fails on the stub, on an empty result, on missing keys, when the `kinds` filter is ignored, and when more than `k` hits come back.
 
-```
-[table        ] FINANCE.TRANSACTIONS  Table FINANCE.TRANSACTIONS. Documented purpose: ...
-[column       ] FINANCE.TRANSACTIONS.AMOUNT_CENTS  Column FINANCE.TRANSACTIONS.AMOUNT_CENTS of type NUMBER (nullable). Meaning: Transaction amount in USD CENTS, never dollars.
-```
+## TODO 5: `hybrid_search_knowledge`
 
-## TODO 5: Implement `hybrid_rrf_search_memories`
+§3.3. Vector search misses exact identifiers such as `AMOUNT_CENTS`; keyword search misses paraphrases. Run both legs over the same table and fuse the ranks:
 
-Pure vector search is strong on meaning but **under-weights exact tokens**. If the user types `AMOUNT_CENTS` or an `ORA-00904` error code, they want the row that *literally contains the string*, not one that's vaguely similar.
+$$\text{score}(d) = \sum_{\text{leg}} \frac{1}{k + r_{\text{leg}}(d)}$$
 
-The fix is **Reciprocal Rank Fusion** — run two retrievals (vector + full-text), combine the rankings:
+$r$ is the 1-based rank in a leg, $k=60$ (`rrf_k`), and a row missing from a leg adds nothing. RRF uses ranks, not scores, so cosine distance and Oracle Text `SCORE` need no calibration.
 
-$$\text{score}(d) = \frac{1}{k + r_{\text{vec}}(d)} + \frac{1}{k + r_{\text{text}}(d)}$$
-
-where $r_{\text{vec}}$ and $r_{\text{text}}$ are 1-based ranks from each retriever (sentinel `999999` when a doc is missing from one list), and $k=60$ is the standard smoothing constant.
-
-RRF doesn't care about absolute scores from each retriever — only the relative ranks — so it's robust to whatever scoring scheme each side uses.
-
-Two prerequisites. The ONNX embedder lives in the database image, and the notebook creates the
-`CTXSYS.CONTEXT` index it needs in §3.3a (it is idempotent), so both are in place by the time this
-cell runs:
-
-| Side | What we use |
-|---|---|
-| Vector | `VECTOR_DISTANCE(c.embedding, VECTOR_EMBEDDING(...) USING :q AS DATA, COSINE)` over `eda_onnx_record_chunks.embedding` (HNSW-indexed) |
-| Full-text | `CONTAINS(m.content, :kw, 1) > 0` with `SCORE(1)` over a `CTXSYS.CONTEXT` index on `eda_onnx_memory.content` |
-
-The `:kw` bind is not the raw question: `CONTAINS` takes an Oracle Text *expression*, so the cell
-reuses `_text_query(query)` from §3.3, which joins the terms with `OR` (a plain sentence is parsed
-as a phrase and matches almost nothing).
-
-The fusion happens in **one SQL statement** — vector CTE, text CTE, FULL OUTER JOIN on memory id, RRF score computed inline, sort + fetch top-k. No round trip to Python.
+Steps: vector leg from `knowledge_vs.similarity_search_with_score(query, k=30)`; keyword leg from `OracleTextSearchRetriever(vector_store=knowledge_vs, k=30).invoke(keyword_terms(query))`; for each leg and each Document at rank 1, 2, 3, …, find or create `fused[doc.id] = to_hit(doc, rrf_score=0.0, vec_rank=None, txt_rank=None)`, set the leg's rank on it and add `1 / (rrf_k + rank)` to `rrf_score`; return the hits sorted by `rrf_score` descending, cut to `k`.
 
 **Solution:**
 
 ```python
-MEMORY_TABLE = "eda_onnx_memory"
-
-def hybrid_rrf_search_memories(query, k=5, per_list=30, rrf_k=60):
-    sql = f"""
-        WITH q_emb AS (
-            SELECT TO_VECTOR(VECTOR_EMBEDDING({ONNX_EMBED_MODEL} USING :q AS DATA),
-                             384, FLOAT64) AS emb
-              FROM dual),
-        vec AS (
-            SELECT m.record_id,
-                   DBMS_LOB.SUBSTR(m.content, 4000, 1) AS content, m.metadata,
-                   ROW_NUMBER() OVER (
-                       ORDER BY VECTOR_DISTANCE(c.embedding, q_emb.emb, COSINE)
-                   ) AS r_vec
-              FROM {MEMORY_TABLE} m
-              JOIN eda_onnx_record_chunks c ON c.source_id = m.record_id
-              CROSS JOIN q_emb
-             WHERE m.user_id = :u AND m.agent_id = :a
-               AND (JSON_VALUE(m.metadata, '$.kind') IS NULL
-                    OR JSON_VALUE(m.metadata, '$.kind') <> 'tool_output')
-             FETCH FIRST :n ROWS ONLY),
-        txt AS (
-            SELECT m.record_id,
-                   DBMS_LOB.SUBSTR(m.content, 4000, 1) AS content, m.metadata,
-                   ROW_NUMBER() OVER (ORDER BY SCORE(1) DESC) AS r_txt
-              FROM {MEMORY_TABLE} m
-             WHERE CONTAINS(m.content, :kw, 1) > 0
-               AND m.user_id = :u AND m.agent_id = :a
-               AND (JSON_VALUE(m.metadata, '$.kind') IS NULL
-                    OR JSON_VALUE(m.metadata, '$.kind') <> 'tool_output')
-             FETCH FIRST :n ROWS ONLY)
-        SELECT COALESCE(v.record_id, t.record_id) AS record_id,
-               COALESCE(v.content, t.content)     AS content,
-               COALESCE(v.metadata, t.metadata)   AS metadata,
-               NVL(v.r_vec, 999999) AS r_vec,
-               NVL(t.r_txt, 999999) AS r_txt,
-               ( 1.0/(:rrf_k + NVL(v.r_vec, 999999))
-               + 1.0/(:rrf_k + NVL(t.r_txt, 999999)) ) AS rrf_score
-          FROM vec v
-          FULL OUTER JOIN txt t ON v.record_id = t.record_id
-         ORDER BY rrf_score DESC
-         FETCH FIRST :k ROWS ONLY
-    """
-    with agent_conn.cursor() as cur:
-        kw = _text_query(query)   # {term} OR {term} … (§3.3) — never the raw sentence
-        cur.execute(sql, q=query, kw=kw, u=USER_ID, a=AGENT_ID,
-                    n=per_list, rrf_k=rrf_k, k=k)
-        rows = []
-        for rec_id, content, meta, r_vec, r_txt, rrf in cur:
-            if hasattr(content, "read"):
-                content = content.read()
-            rows.append({"record_id": rec_id,
-                         "kind": (meta or {}).get("kind", "memory"),
-                         "subject": (meta or {}).get("subject", ""),
-                         "content": str(content or "")[:500],
-                         "r_vec": int(r_vec), "r_txt": int(r_txt),
-                         "rrf_score": float(rrf)})
-    return rows
+def hybrid_search_knowledge(query: str, k: int = 5, rrf_k: int = 60) -> list[dict]:
+    vec = [doc for doc, _ in knowledge_vs.similarity_search_with_score(query, k=30)]
+    txt = OracleTextSearchRetriever(vector_store=knowledge_vs, k=30).invoke(keyword_terms(query))
+    fused = {}
+    for leg, docs in (("vec_rank", vec), ("txt_rank", txt)):
+        for rank, doc in enumerate(docs, start=1):
+            hit = fused.setdefault(doc.id, to_hit(doc, rrf_score=0.0, vec_rank=None, txt_rank=None))
+            hit[leg] = rank
+            hit["rrf_score"] += 1 / (rrf_k + rank)
+    return sorted(fused.values(), key=lambda h: h["rrf_score"], reverse=True)[:k]
 ```
 
-The hard-stop assert below your implementation runs the SQL against a real query and asserts the shape — `r_vec` and `r_txt` are ints (rank sentinels), `rrf_score` is a float, and at least one hit comes back.
+`keyword_terms` (in `workshop/retrieval.py`) turns the question into search words: it lowercases, drops stop words and splits identifiers at `_`, because the Oracle Text index tokenises there (`which column is RATE_BP?` becomes `column rate bp`). A plain multi-word sentence passed to `CONTAINS` is parsed as a phrase and matches almost nothing.
 
-## The three-way retrieval probe (just run)
+The checkpoint fails on the stub, on missing keys, when either leg is empty, when no AML policy note reaches the top 3 for a paraphrased question, and when an exact-identifier query (`RATE_BP`) does not rank `FINANCE.LOANS.RATE_BP` first.
 
-Your `hybrid_rrf_search_memories(query, k)` (TODO 5) returns a list with each hit annotated by `r_vec`, `r_txt`, and `rrf_score`. Run the same query through:
+## LangChain interop
 
-- `retrieve_knowledge(probe_q, k=3)` — vector only (your TODO 4)
-- `keyword_search_memories(probe_q, k=3)` — Oracle Text only
-- `hybrid_rrf_search_memories(probe_q, k=3)` — fused via RRF (your TODO 5)
+Part 3 already uses `langchain-oracledb`. Other components of the package:
 
-with this query:
-
-```python
-probe_q = "amount_cents transaction amounts stored in USD CENTS, never dollars"
-```
-
-The query is deliberately mixed — `AMOUNT_CENTS` is a precise token (Oracle Text wins) and *"how transaction amounts are stored"* is a fuzzy semantic concept (vector wins). Hybrid should rank the best-matching memory above either alone.
-
-**Solution** — just call each retriever in turn and print the results:
-
-```python
-print("=" * 80)
-print(f"QUERY: {probe_q!r}")
-print("=" * 80)
-
-print("\n--- A) VECTOR ONLY ---")
-for h in retrieve_knowledge(probe_q, k=3):
-    print(f"  [{h['kind']:12s}] {h['subject'][:40]:40s}  {h['body'][:100]}")
-
-print("\n--- B) KEYWORD ONLY ---")
-for h in keyword_search_memories(probe_q, k=3):
-    print(f"  [{h['kind']:12s}] score={h['score_txt']:6.2f}  {h['subject'][:40]:40s}")
-
-print("\n--- C) HYBRID via RRF ---")
-for h in hybrid_rrf_search_memories(probe_q, k=3):
-    print(f"  rrf={h['rrf_score']:.4f}  r_vec={h['r_vec']:>3}  r_txt={h['r_txt']:>3}  {h['subject'][:40]}")
-```
-
-Watch the `r_vec` / `r_txt` columns: a row whose `r_vec` is low (top of vector list) but `r_txt` is `999999` (missing from keyword list) still gets a fair RRF score from its vector half — and vice versa. Memories that show up in **both** lists get the highest combined score.
-
-## The same three legs from LangChain — `langchain-oracledb`
-
-The notebook (§3.6) repeats the retrieval legs through [`langchain-oracledb`](https://pypi.org/project/langchain-oracledb/) — useful when the surrounding app is already a LangChain app, and useful as a second opinion on the SQL you just wrote. Same database primitives, one import each:
-
-| This Part | `langchain-oracledb` |
+| Need | `langchain-oracledb` |
 |---|---|
-| `OracleONNXEmbedder` (§2.1) | `OracleEmbeddings(conn=..., params={"provider": "database", "model": "ALL_MINILM_L12_V2"})` — the in-database ONNX model, no network hop; `embed_query` returns the same 384-dim vector as `VECTOR_EMBEDDING` |
-| `retrieve_knowledge` (§3.2, vector + rerank) | `OracleVS(client=..., embedding_function=..., table_name=..., distance_strategy=DistanceStrategy.COSINE)` then `similarity_search` / `similarity_search_with_score` / `max_marginal_relevance_search` / `.as_retriever()` |
-| `keyword_search_memories` (§3.3, Oracle Text) | `create_text_index(...)` + `OracleTextSearchRetriever(vector_store=..., k=...)` |
-| `hybrid_rrf_search_memories` (§3.4, RRF in SQL) | `OracleHybridSearchRetriever(vector_store=..., idx_name=..., search_mode="hybrid")` over a `DBMS_HYBRID_VECTOR` index (`create_hybrid_index`, with `OracleVectorizerPreference` supplying the vectorizer) |
-| `get_thread` + messages (§7.1) | `OracleChatMessageHistory` |
-| — | `OracleSummary`, `OracleTextSplitter`, `OracleDocLoader`, `OracleSemanticCache` |
+| In-database embeddings | `OracleEmbeddings(conn=..., params={"provider": "database", "model": "ALL_MINILM_L12_V2"})` |
+| Vector store | `OracleVS(client, embedding_function, table_name, DistanceStrategy.COSINE)` with `similarity_search`, `similarity_search_with_score`, `max_marginal_relevance_search`, `.as_retriever()` |
+| Keyword leg | `create_text_index(...)` + `OracleTextSearchRetriever(vector_store=..., k=...)` |
+| Hybrid inside the database | `OracleHybridSearchRetriever(vector_store=..., idx_name=..., search_mode="hybrid")` over a `DBMS_HYBRID_VECTOR` index (`create_hybrid_index`) |
+| Chat history | `OracleChatMessageHistory` |
+| Utilities | `OracleSummary`, `OracleTextSplitter`, `OracleDocLoader`, `OracleSemanticCache` |
 
-Two practical notes:
+- **`OracleVS` owns its table.** It creates a `VECTOR` table (`id`, `text`, `metadata`, `embedding`); that is separate from the OAMP-managed tables from Part 2, which is why `sync_knowledge` mirrors them.
+- **The hybrid index is exclusive.** `create_hybrid_index` fails with `ORA-29879` on a table that already carries a separate vector index and an Oracle Text index, as `AML_KNOWLEDGE_VS` does. The hybrid index is both, so it needs its own table.
 
-- **`OracleVS` owns its table.** It creates and manages a `VECTOR` table (`id`, `text`, `metadata`, `embedding`) with an HNSW index; that is unrelated to the OAMP-managed tables from Part 2. Point it at a table you own, or mirror a slice of OAMP rows as the notebook does.
-- **The hybrid index is exclusive.** `create_hybrid_index` fails with `ORA-29879` on a table that already carries a separate vector index *and* an Oracle Text index (which `OracleVS.from_texts` + `create_text_index` produce) — the hybrid index *is* both, so it needs its own table.
+## Key takeaways: Part 3
 
-## Key Takeaways — Part 3
-
-- **Vector search alone misses exact tokens.** A user typing `AMOUNT_CENTS` or `ORA-00904` wants the row that *literally contains the string*. Pure cosine retrieval underweights this. Hybrid (vector + Oracle Text via RRF) closes the gap server-side in one SQL.
-- **Reranking is one SQL primitive.** `PREDICTION(RERANKER_ONNX USING :q AS DATA1, doc AS DATA2)` runs the cross-encoder server-side (register the model with `app/backend/db/reranker_setup.py`; the preflight reports whether it is there); the call gracefully degrades to cosine ordering when no reranker is loaded.
-- **Oversample before rerank.** A reranker is only useful with enough candidates to reorder. `k * 4` candidates from cosine, then rerank to top-k.
-- **RRF is rank-based, not score-based.** No need to normalize cosine distance against `SCORE(1)` — they're from different worlds. Fusing on rank dodges the calibration problem.
+- **Vector search alone misses exact tokens.** A user typing `AMOUNT_CENTS` or `ORA-00904` wants the row that contains the string. Fusing a keyword leg with RRF closes the gap.
+- **Reranking is one SQL primitive.** `PREDICTION(RERANKER_ONNX USING :q AS DATA1, doc AS DATA2)` runs the cross-encoder in the database (register the model with `app/backend/db/reranker_setup.py`; the §1.2 preflight reports whether it is loaded). Without it, `rerank` keeps the vector order.
+- **Oversample before rerank.** A reranker needs candidates to reorder: `k * 4` from the vector search, then rerank to `k`.
+- **RRF is rank-based.** Cosine distance and `SCORE(1)` come from different scales; fusing on rank avoids calibrating them.
 
 ## Troubleshooting
 
-**`AttributeError: 'NoneType' object has no attribute 'metadata'`** — `memory_client.search` returned no hits. Run the scan cell first to populate the store.
+**`retrieve_knowledge` returns nothing**: `AML_KNOWLEDGE_VS` is empty. Run §2.4 (the scan) and §3.1 first.
 
-**`ORA-29855: error occurred in the execution of ODCIINDEXCREATE`** — The `CTXSYS.CONTEXT` index needs the `CTXAPP` role. The setup cell grants it; if you're running outside the Codespace, `GRANT CTXAPP TO AGENT` as `SYSDBA`.
+**`ORA-29855: error occurred in the execution of ODCIINDEXCREATE`**: the Oracle Text index needs the `CTXAPP` role. The setup grants it; outside the Codespace run `GRANT CTXAPP TO AGENT` as `SYSDBA`.
 
-**Hybrid or keyword query returns nothing** — `CONTAINS()` takes an Oracle Text *expression*, and a plain
-multi-word string is parsed as a **phrase** — `amount_cents transaction amounts stored` means those
-words adjacent, in that order, so almost nothing matches (quoting it makes the phrase explicit,
-which is worse, not better). Join the terms with an operator instead: `{term} OR {term} …`, which is
-what the notebook's `_text_query()` (§3.3) does. If the leg is empty *after* that, the index is
-missing — `DRG-10599: column is not indexed` means the §3.3a cell has not run against this database
-yet.
+**The keyword leg is empty**: the query reached `CONTAINS` as a phrase, or the index is stale. Pass the question through `keyword_terms`; `refresh_text_index` syncs the index after writes. `DRG-10599: column is not indexed` means the §3.1 index cell has not run against this database.

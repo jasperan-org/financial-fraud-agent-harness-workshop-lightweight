@@ -1,0 +1,17 @@
+[
+  {
+    "number": "0.1",
+    "svg": "fig-0.1-harness-anatomy.svg",
+    "caption": "The model (amber) is the only reasoning box; long-term memory (green) is the only persistent state. Each box names the Part that builds it."
+  },
+  {
+    "number": "2.1",
+    "svg": "fig-2.1-embedding-geometry.svg",
+    "caption": "Left: query and memories as unit vectors; the angle to q sets the distance. Right: the same memories on the cosine-distance axis (schematic)."
+  },
+  {
+    "number": "2.2",
+    "svg": "fig-2.2-scan-pipeline.svg",
+    "caption": "Scanners produce Fact objects; write_facts embeds only those whose body hash changed (amber, inside the database), then stores them (green)."
+  }
+]
