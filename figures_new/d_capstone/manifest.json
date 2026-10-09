@@ -2,6 +2,6 @@
   {
     "number": "6.1",
     "svg": "fig-6.1-record-and-recall.svg",
-    "caption": "Record and recall. Look at the two writes from one validated decision; dashed, a later question is answered from the memory."
+    "caption": "Record and recall. One validated decision is written to two places; later, dashed, a question is answered from the agent's memory."
   }
 ]

@@ -2,11 +2,11 @@
   {
     "number": "3.1",
     "svg": "fig-3.1-bi-vs-cross.svg",
-    "caption": "Stage 1 embeds query and document separately, so document vectors are stored once. Stage 2 reads each pair jointly and scores only the candidates."
+    "caption": "Pass 1 is fast: every document is prepared once, ahead of time. Pass 2 is slower but more careful: it re-reads only the best candidates against the question."
   },
   {
     "number": "3.2",
     "svg": "fig-3.2-rrf-curve.svg",
-    "caption": "Contribution <code>1/(k+r)</code> of one leg, <code>k = 60</code>. The highlighted gap: any row found by both legs outscores any row found by one."
+    "caption": "Points a result earns from one search, based on its rank (<code>1/(k+r)</code>, <code>k = 60</code>). The highlighted gap: a result found by both searches always outscores one found by only one."
   }
 ]
