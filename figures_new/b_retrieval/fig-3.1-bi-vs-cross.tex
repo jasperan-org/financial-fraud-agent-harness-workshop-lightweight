@@ -13,7 +13,7 @@
   note/.style={font=\small, text=jnb-text-muted, align=center},
 }
 % ------------------------------------------------------------------ left: bi-encoder
-\node[panel title] at (3.7,5.55) {Stage 1 \enspace bi\mbox{-}encoder \enspace\textmd{(cosine, HNSW)}};
+\node[panel title] at (3.7,5.55) {First pass \enspace\textmd{search by meaning}};
 \node[qd] (q1) at (0.3,3.9) {query $q$};
 \node[qd] (d1) at (0.3,1.5) {document $d$};
 \node[box, minimum width=0.9cm] (f1) at (2.8,3.9) {$f$};
@@ -33,9 +33,9 @@
 \draw[fourth, line width=1pt, ->] (cos) -- (s1);
 \node[inp, font=\small] at (5.0,4.55) {$f(q)$};
 \node[third, font=\small] at (5.0,0.85) {$f(d)$};
-\node[note, text width=6.4cm] at (3.7,-0.2) {$d$ is embedded once by the in\mbox{-}database model\\and stored in \texttt{AML\_KNOWLEDGE\_VS}};
+\node[note, text width=6.4cm] at (3.7,-0.2) {$d$ is embedded once by the in\mbox{-}database model\\and stored in the vector index};
 % ------------------------------------------------------------------ right: cross-encoder
-\node[panel title] at (13.4,5.55) {Stage 2 \enspace cross\mbox{-}encoder \enspace\textmd{(rerank)}};
+\node[panel title] at (13.4,5.55) {Second pass \enspace\textmd{reranker}};
 \node[qd] (q2) at (10.3,3.9) {query $q$};
 \node[qd] (d2) at (10.3,1.5) {document $d$};
 \node[draw=jnb-highlight, fill=jnb-highlight!22!jnb-surface-bg, line width=1.8pt, rounded corners=3pt,
@@ -45,7 +45,7 @@
 \draw[inp arrow] (q2.east) -- ([yshift=0.0cm]g.north west |- q2.east);
 \draw[inp arrow] (d2.east) -- ([yshift=0.0cm]g.south west |- d2.east);
 \draw[fourth, line width=1pt, ->] (g) -- (s2);
-\node[note, text width=6cm] at (13.4,-0.2) {one forward pass per pair \,$(q,d)$;\\only the $4k$ candidates are scored};
+\node[note, text width=6cm] at (13.4,-0.2) {one model run per pair \,$(q,d)$;\\only the top candidates are scored};
 % ------------------------------------------------------------------ divider + equations
 \draw[draw=jnb-grey-cell-edge, line width=0.6pt] (9.0,-0.8) -- (9.0,5.2);
 \node at (4.0,-1.7) {$\fourth{s_{\cos}}=\cos\!\big(f(\inp{q}),\,f(\inp{d})\big)=\dfrac{f(\inp q)\cdot f(\inp d)}{\lVert f(\inp q)\rVert\,\lVert f(\inp d)\rVert}$};

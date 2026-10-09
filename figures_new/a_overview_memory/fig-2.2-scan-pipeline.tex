@@ -17,18 +17,18 @@
 % ------------------------------------------------------------ column A: the four scanners
 \node[font=\normalsize] at (0,7.3) {\textbf{catalog views}};
 \foreach \v/\w/\s/\k [count=\i from 0] in {%
-  {ALL\_TABLES}/{ALL\_TAB\_COMMENTS}/{\_scan\_tables}/{table},
-  {ALL\_TAB\_COLUMNS}/{ALL\_COL\_COMMENTS}/{scan\_columns}/{column},
-  {ALL\_CONSTRAINTS}/{ALL\_CONS\_COLUMNS}/{scan\_relationships}/{relationship},
-  {V\$SQL}/{(workload)}/{scan\_workload}/{query\_pattern}}{
+  {ALL\_TABLES}/{ALL\_TAB\_COMMENTS}/{table scan}/{table},
+  {ALL\_TAB\_COLUMNS}/{ALL\_COL\_COMMENTS}/{column scan}/{column},
+  {ALL\_CONSTRAINTS}/{ALL\_CONS\_COLUMNS}/{relationship scan}/{relationship},
+  {V\$SQL}/{(workload)}/{workload scan}/{query\_pattern}}{
   \node[src] (S\i) at (0,5.5-\i*2.75)
-    {\texttt{\textcolor{jnb-input}{\v}}\\\texttt{\textcolor{jnb-input}{\w}}\\[2pt]\texttt{\textcolor{jnb-text-muted}{\s}}\\[-1pt]\subl{kind}\ \texttt{\textcolor{jnb-text-body}{\k}}};
+    {\texttt{\textcolor{jnb-input}{\v}}\\\texttt{\textcolor{jnb-input}{\w}}\\[2pt]\textcolor{jnb-text-muted}{\s}\\[-1pt]\subl{kind}\ \texttt{\textcolor{jnb-text-body}{\k}}};
 }
 
 % ------------------------------------------------------------ column B: the Fact card
-\node[font=\normalsize] at (6.9,7.3) {\textbf{\texttt{scan\_schema}}\ \subl{$\to$ \texttt{Fact}s}};
+\node[font=\normalsize] at (6.9,7.3) {\textbf{schema scan}\ \subl{$\to$ facts}};
 \node[card, minimum width=6.5cm, minimum height=7.4cm, anchor=north] (F) at (6.9,6.6) {};
-\node[font=\small, anchor=north west] at ([xshift=0.25cm,yshift=-0.2cm]F.north west) {\textbf{\texttt{Fact}}\ \subl{dataclass}};
+\node[font=\small, anchor=north west] at ([xshift=0.25cm,yshift=-0.2cm]F.north west) {\textbf{one fact}};
 \node[fld] at ([xshift=0.25cm,yshift=-1.2cm]F.north west) {\texttt{kind}};
 \node[val] at ([xshift=0.25cm,yshift=-1.6cm]F.north west) {\texttt{"table"}};
 \node[fld] at ([xshift=0.25cm,yshift=-2.4cm]F.north west) {\texttt{subject}};
@@ -45,16 +45,16 @@
 
 % ------------------------------------------------------------ column C: write_facts -> embed -> store
 \node[card, minimum width=6.9cm, minimum height=4.1cm, anchor=north] (G) at (16.5,6.6) {};
-\node[font=\normalsize, anchor=north west] at ([xshift=0.25cm,yshift=-0.2cm]G.north west) {\textbf{\texttt{write\_facts}}};
+\node[font=\normalsize, anchor=north west] at ([xshift=0.25cm,yshift=-0.2cm]G.north west) {\textbf{store facts}};
 \node[lab, anchor=north west, align=left] at ([xshift=0.25cm,yshift=-0.85cm]G.north west)
-  {one current row per \texttt{(kind, subject)}\\[1pt]\texttt{body\_hash = sha256(body)[:32]}};
+  {one current row per \texttt{(kind, subject)}\\[1pt]changed? $=$ fingerprint of body};
 % outcome bar: schematic proportions (most facts unchanged on a re-scan)
 \fill[jnb-grey-cuboid-left] ([xshift=0.25cm,yshift=1.2cm]G.south west) rectangle ++(4.8,0.32);
 \fill[jnb-third] ([xshift=5.05cm,yshift=1.2cm]G.south west) rectangle ++(0.9,0.32);
 \fill[jnb-input] ([xshift=5.95cm,yshift=1.2cm]G.south west) rectangle ++(0.6,0.32);
 \node[lab, anchor=north west, text=jnb-text-body] at ([xshift=0.2cm,yshift=1.15cm]G.south west)
   {skipped\hspace{0.9em}\third{updated}\hspace{0.9em}\inp{new}};
-\node[lab, anchor=south west] at ([xshift=0.25cm,yshift=0.12cm]G.south west) {same hash $\Rightarrow$ no embed call};
+\node[lab, anchor=south west] at ([xshift=0.25cm,yshift=0.12cm]G.south west) {unchanged $\Rightarrow$ no embedding};
 
 \node[card, jnb cell hl, minimum width=6.9cm, minimum height=2.6cm, anchor=center, align=center, inner sep=6pt] (E) at (16.5,-0.4)
   {\textbf{\texttt{\footnotesize VECTOR\_EMBEDDING}}\\[2pt]{\footnotesize\texttt{(ALL\_MINILM\_L12\_V2}}\\[-1pt]{\footnotesize\texttt{USING :t AS DATA)}}\\[2pt]\textcolor{jnb-text-body}{\footnotesize runs \textbf{inside} Oracle $\cdot$ 384 floats}};
@@ -63,11 +63,11 @@
 \node[font=\normalsize, anchor=north west, text=jnb-third] at ([xshift=0.25cm,yshift=-0.2cm]M.north west) {\textbf{persistent state}};
 \node[font=\footnotesize, anchor=north west, align=left, text=jnb-third] at ([xshift=0.25cm,yshift=-1.0cm]M.north west)
   {\texttt{EDA\_ONNX\_MEMORY}\\[-1pt]{\textcolor{jnb-text-body}{memory text $+$ metadata}}\\[4pt]
-   \texttt{EDA\_ONNX\_RECORD\_CHUNKS}\\[-1pt]{\textcolor{jnb-text-body}{\texttt{embedding}: 384 dim, HNSW}}};
+   \texttt{EDA\_ONNX\_RECORD\_CHUNKS}\\[-1pt]{\textcolor{jnb-text-body}{\texttt{embedding}: 384 dim, vector index}}};
 \node[lab, anchor=north west, align=left, text=jnb-third] at ([xshift=0.1cm,yshift=-0.2cm]M.south west)
-  {\texttt{link\_schema\_facts}: column and relationship\\memories \texttt{supports} their table memory};
+  {links: column and relationship\\memories point to their table memory};
 
-\draw[draw=jnb-text-muted, line width=1pt, ->] (F.east |- G.west) -- node[lab, above] {\texttt{list[Fact]}} (G.west);
+\draw[draw=jnb-text-muted, line width=1pt, ->] (F.east |- G.west) -- node[lab, above] {facts} (G.west);
 \draw[draw=jnb-third, line width=1pt, ->] (G.south) -- node[lab, right, text=jnb-third] {changed facts only} (E.north);
 \draw[draw=jnb-third, line width=1pt, ->] (E.south) -- node[lab, right, text=jnb-third] {vector $+$ text} (M.north);
 
@@ -75,5 +75,5 @@
 \node[font=\large] at (9.0,-9.1) {%
   $\third{\mathbf{e}}\;=\;\mathrm{VECTOR\_EMBEDDING}\bigl(\inp{\mathtt{body}}\bigr)\in\mathbb{R}^{384}$};
 \node[font=\large] at (9.0,-10.0) {%
-  $\text{embed only if}\quad \mathrm{sha256}(\inp{\mathtt{body}})\;\neq\;\mathtt{stored\_hash}$};
+  $\text{embed only if}\quad \mathrm{fingerprint}(\inp{\mathtt{body}})\;\neq\;\mathtt{stored\ fingerprint}$};
 \end{tikzpicture}

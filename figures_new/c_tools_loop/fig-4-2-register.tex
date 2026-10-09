@@ -3,7 +3,7 @@
 % ------------------------------------------------------------------ source (input)
 \draw[inp, fill=jnb-input!12!jnb-surface-bg, rounded corners=2pt, line width=1.2pt] (0,0.35) rectangle (7.0,-5.25);
 \node[inp, anchor=south west, font=\footnotesize] at (0.1,0.45) {your function};
-\cl{0.2}{-0.15}{@register}{}
+\cl{0.2}{-0.15}{register}{}
 \cl{0.2}{-0.62}{def tool\_run\_sql(}{}
 \cl{0.9}{-1.04}{sql: str,}{}
 % the highlighted parameter line
@@ -18,17 +18,17 @@
 \cl{0.9}{-4.12}{statement that isn't read\hy only."""}{}
 \cl{0.9}{-4.72}{...}{faint}
 % build_schema
-\node[box, text width=2.55cm, align=center, anchor=center] (bs) at (9.2,-2.45)
-  {\strong{\code{build\_schema}}\\[3pt]\footnotesize\code{tool\_} stripped\\[-1pt]\footnotesize docstring\\[-1pt]\footnotesize type hints\\[-1pt]\footnotesize defaults};
+\node[box, text width=3.1cm, align=center, anchor=center] (bs) at (9.2,-2.45)
+  {\strong{\mbox{build description}}\\[3pt]\footnotesize name\\[-1pt]\footnotesize docstring\\[-1pt]\footnotesize type hints\\[-1pt]\footnotesize defaults};
 \draw[flowin] (7.0,-2.45) -- (bs.west);
 
 % ------------------------------------------------------------------ sink 1 : TOOLS (in\hy process)
 \node[box, anchor=north west, text width=9.1cm] (tl) at (11.8,0.35)
-  {\code{TOOLS["run\_sql"] = (fn, schema)}\\[-1pt]\footnotesize\muted{in\hy process dict: the loop dispatches by \emph{name}}};
+  {\strong{tool list in memory}\\[-1pt]\footnotesize\muted{the agent loop looks tools up by \emph{name}}};
 % ------------------------------------------------------------------ sink 2 : JSON schema (output)
 \begin{scope}[yshift=-0.45cm]
 \draw[out, fill=jnb-output!12!jnb-surface-bg, rounded corners=2pt, line width=1.2pt] (11.8,-1.45) rectangle (20.9,-6.2);
-\node[out, anchor=south west, font=\footnotesize] at (11.9,-1.35) {schema \;$\to$\; the \code{tools=} argument of \code{chat()}};
+\node[out, anchor=south west, font=\footnotesize] at (11.9,-1.35) {tool description \;$\to$\; sent to the model with each chat request};
 \cl{11.95}{-1.85}{\{"type": "function", "function": \{}{}
 \cl{12.4}{-2.25}{"name": "run\_sql",}{}
 \cl{12.4}{-2.65}{"description": "Execute a READ\hy ONLY ...",}{}
@@ -43,7 +43,7 @@
 \end{scope}
 % ------------------------------------------------------------------ sink 3 : toolbox row (third)
 \node[boxthird, anchor=north west, text width=9.1cm] (tb) at (11.8,-7.2)
-  {\strong{\code{toolbox}} row \footnotesize\muted{(DB\hy resident, HNSW index)}\\[2pt]
+  {\strong{\code{toolbox}} row \footnotesize\muted{(stored in the database, vector index)}\\[2pt]
    \footnotesize\code{name, description, parameters,}\\[-1pt]
    \footnotesize\code{embedding = VECTOR\_EMBEDDING(}\\[-1pt]
    \footnotesize\code{\ \ model USING "run\_sql: <description>}\\[-1pt]
@@ -54,5 +54,5 @@
 \draw[flowthird] (bs.east) -- ++(0.4,0) |- (tb.west);
 % defining equation
 \node[anchor=north] at (10.0,-10.4) {\normalsize
-  $\mathtt{@register}(\inp{f})\;\Rightarrow\;\bigl(\mathtt{TOOLS}[n],\ \out{\mathrm{schema}(f)},\ \third{\mathrm{toolbox}[n]}\bigr),\qquad n=\mathtt{name}(f)$};
+  $\mathrm{register}(\inp{f})\;\Rightarrow\;\bigl(\mathrm{tool\ list}[n],\ \out{\mathrm{description}(f)},\ \third{\mathrm{toolbox}[n]}\bigr),\qquad n=\mathtt{name}(f)$};
 \end{tikzpicture}
