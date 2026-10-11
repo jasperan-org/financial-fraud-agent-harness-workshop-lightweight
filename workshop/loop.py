@@ -183,7 +183,7 @@ def force_final_answer(chat, messages):
 
 
 def check_agent_turn(ns):
-    """TODO 9 checkpoint: run `ns["agent_turn"]` against a scripted model and a probe tool.
+    """TODO 8 checkpoint: run `ns["agent_turn"]` against a scripted model and a probe tool.
 
     The model first asks for the probe tool, then answers. A correct loop runs the tool, appends its
     result, calls the model once more and stops. `ns` is the notebook namespace; the fakes replace
@@ -216,17 +216,17 @@ def check_agent_turn(ns):
     try:
         answer = ns["agent_turn"]("probe?", thread_id="todo9-check", max_iterations=4, verbose=False)
     except Exception as e:
-        raise AssertionError(f"❌ TODO 9: agent_turn raised {type(e).__name__}: {e}") from None
+        raise AssertionError(f"❌ TODO 8: agent_turn raised {type(e).__name__}: {e}") from None
     finally:
         ns.update(saved)
-    assert ran == [2], "❌ TODO 9: the tool call was not dispatched with its arguments through call_tool."
+    assert ran == [2], "❌ TODO 8: the tool call was not dispatched with its arguments through call_tool."
     tool_msgs = [m for m in (chat_calls[1] if len(chat_calls) > 1 else []) if m["role"] == "tool"]
     assert tool_msgs == [{"role": "tool", "tool_call_id": "probe-1", "content": "probe result"}], \
-        "❌ TODO 9: the tool result must be appended as a role='tool' message before the next chat call."
+        "❌ TODO 8: the tool result must be appended as a role='tool' message before the next chat call."
     echoed = [m for m in (chat_calls[1] if len(chat_calls) > 1 else []) if m["role"] == "assistant"]
     assert echoed and [c["id"] for c in echoed[-1].get("tool_calls", [])] == ["probe-1"], \
-        "❌ TODO 9: append assistant_message(msg) before the tool results, so every result has a matching call."
+        "❌ TODO 8: append assistant_message(msg) before the tool results, so every result has a matching call."
     assert len(chat_calls) == 2, \
-        "❌ TODO 9: the loop must stop (break) as soon as the model answers without tool calls."
-    assert answer == "final answer", "❌ TODO 9: agent_turn must return the model's final answer."
-    print("✅ TODO 9 passed: the loop ran the tool, appended its result, and stopped on the answer.")
+        "❌ TODO 8: the loop must stop as soon as the model answers without tool calls; keep the given `break` and the tool branch intact."
+    assert answer == "final answer", "❌ TODO 8: agent_turn must return the model's final answer."
+    print("✅ TODO 8 passed: the loop ran the tool, appended its result, and stopped on the answer.")

@@ -42,14 +42,14 @@ def main(check):
     for path in sorted(PARTS.glob("*/*-figure.json")):
         cell = json.loads(path.read_text())
         src = cell["source"] if isinstance(cell["source"], str) else "".join(cell["source"])
-        number = re.search(r'jnb-fignum">Figure ([\d.]+)<', src).group(1)
+        number = re.search(r'data-fig="([\d.]+)"', src).group(1)
         e = es[number]
         new = b.figure_cell(e["svg_text"], "", alt_text(e["caption"]), number, b.render(e["caption"]))
         new_src = new["source"]
         if new_src != src:
             changed += 1
-            old_cap = re.search(r"</span> (.*)</figcaption>", src, re.S).group(1)
-            new_cap = re.search(r"</span> (.*)</figcaption>", new_src, re.S).group(1)
+            old_cap = re.search(r"<figcaption>(.*)</figcaption>", src, re.S).group(1)
+            new_cap = re.search(r"<figcaption>(.*)</figcaption>", new_src, re.S).group(1)
             what = "caption" if old_cap != new_cap else "svg"
             print(f"{path.relative_to(PARTS)}  Figure {number}: {what} differs")
             if check and what == "caption":

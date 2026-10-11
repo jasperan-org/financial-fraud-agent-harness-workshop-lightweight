@@ -18,7 +18,7 @@ const STARTERS = {
     { text: "Briefly summarize the FINANCE schema — what entities and how they relate." },
     { text: "How many transactions were flagged or blocked by the AML rules in the last 90 days, and which regions and typologies drive them?",
       tag: "globe" },
-    { text: "Give me the complete 360° view of account 7 — customer, branch, cards, and transactions — in one document.",
+    { text: "Which merchants attract the most flagged transactions, and where are they located?",
       tag: "globe" },
     { text: "Map the AML picture: flag counts by region and typology for the last 90 days.",
       tag: "globe" },

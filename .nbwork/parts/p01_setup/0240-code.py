@@ -6,8 +6,5 @@ _bare_answer = chat([{"role": "user", "content": QUESTION}]).choices[0].message.
 print("A:", (_bare_answer or "")[:300])
 
 # Hard-stop checkpoint: TODO 1
-assert QUESTION.strip(), "❌ TODO 1: set QUESTION to a question first."
-assert any(w in QUESTION.lower() for w in ("meridian", "finance", "customer", "account", "transaction", "alert")), \
-    "❌ TODO 1: ask about Meridian Bank data (a customer, account, transaction or alert)."
-assert _bare_answer, "❌ TODO 1: the model returned no answer. Check your key and LLM_MODEL."
-print("✅ TODO 1 passed: the bare model answered, with no access to the bank data.")
+from workshop.llm import check_bare_question
+check_bare_question(QUESTION, _bare_answer)

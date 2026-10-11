@@ -3,14 +3,15 @@ import re
 
 _READ_ONLY = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 
-# TODO 7: implement tool_run_sql (keep the @register)
-# Returns a JSON string: {"columns": [...], "rows": [[...]], "row_count": N}, or {"error": "..."}.
-# Steps:
-# 1. Reject a statement that _READ_ONLY does not match (after sql.strip()) with an error JSON.
-# 2. Execute it on agent_conn.cursor() and return wt.rows_json(cur, max_rows).
-# 3. Catch any database error and return it as {"error": str(e)}.
 @register
 def tool_run_sql(sql: str, max_rows: int = 50) -> str:
     """Execute a READ-ONLY SQL statement (SELECT/WITH only) against the Oracle AI Database and return up to `max_rows` rows as JSON."""
-    # YOUR CODE HERE
-    raise NotImplementedError("TODO 7: tool_run_sql")
+    # TODO 6 (three lines, two spots):
+    # (a) Here: if _READ_ONLY.match(sql.strip()) finds no match, return json.dumps({"error": "<short message>"}).
+    # (b) Inside the `with` below: run `sql` on `cur`, then return wt.rows_json(cur, max_rows),
+    #     which gives a JSON string {"columns": [...], "rows": [[...]], "row_count": N}.
+    try:
+        with agent_conn.cursor() as cur:
+            raise NotImplementedError("TODO 6: run the SQL and return wt.rows_json(cur, max_rows)")
+    except Exception as e:   # any database error goes back to the agent as JSON
+        return json.dumps({"error": str(e)})

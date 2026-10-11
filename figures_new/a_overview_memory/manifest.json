@@ -2,7 +2,7 @@
   {
     "number": "0.1",
     "svg": "fig-0.1-harness-anatomy.svg",
-    "caption": "The model (amber) does all the reasoning; long-term memory (green) is the only thing kept between questions. Each box names the Part that builds it."
+    "caption": "A question comes in, the model (amber) uses tools in a loop until it can answer, and only long-term memory (green) is kept between questions. Each box names the Part that builds it."
   },
   {
     "number": "2.1",

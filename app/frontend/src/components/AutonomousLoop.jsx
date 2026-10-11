@@ -514,8 +514,7 @@ export default function AutonomousLoop({ aml, identity }) {
         {!running && !aml.last && (
           <>
             <div className="text-[11px] text-text-secondary leading-snug">
-              New FM transactions are triaged here by a <span className="text-accent-oracle">captured grok run</span>:
-              the recorded context packs, tool calls and decisions are replayed over the queue below.
+              New financial market transactions are triaged here by the AML Agent.
             </div>
             <div className="text-[11px] text-text-muted leading-snug">
               No live tokens are spent — the run is a recording. Alerts outside the capture fall back to the

@@ -7,6 +7,6 @@
   {
     "number": "3.2",
     "svg": "fig-3.2-rrf-curve.svg",
-    "caption": "Points a result earns from one search, based on its rank (<code>1/(k+r)</code>, <code>k = 60</code>). The highlighted gap: a result found by both searches always outscores one found by only one."
+    "caption": "Points a result earns from one search, based on its rank (<code>1/(k+r)</code>, <code>k = 60</code>). The highlighted gap shows why a result found by both searches always beats one found by only one."
   }
 ]

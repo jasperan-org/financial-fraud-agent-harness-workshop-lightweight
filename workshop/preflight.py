@@ -86,10 +86,8 @@ def _finance(conn):
 
 def _models(conn):
     has = lambda name: _scalar(conn, f"SELECT COUNT(*) FROM user_mining_models WHERE model_name = '{name}'", 0)
-    embedder, reranker = has("ALL_MINILM_L12_V2"), has("RERANKER_ONNX")
-    detail = ("embedder ALL_MINILM_L12_V2 (384-dim); "
-              + ("reranker RERANKER_ONNX" if reranker
-                 else "note: no reranker, retrieval keeps cosine order"))
+    embedder = has("ALL_MINILM_L12_V2")
+    detail = "embedder ALL_MINILM_L12_V2 (384-dim)" + ("; reranker RERANKER_ONNX" if has("RERANKER_ONNX") else "")
     _line("models", embedder, detail, "cd app && python scripts/bootstrap.py")
     return embedder
 

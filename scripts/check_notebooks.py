@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Validate the notebook pair generated from `.nbwork/parts` (`python3 .nbwork/nbparts.py assemble`).
 
-`notebook_complete.ipynb` is the answer key; `notebook_student.ipynb` replaces TODOs 2-9 with
+`notebook_complete.ipynb` is the answer key; `notebook_student.ipynb` replaces TODOs 2-8 with
 stubs (TODO 1 is an inline prompt in both). Checks: both parse; neither embeds a credential;
-the answer key has no stub; the student notebook has exactly 8 stubs, one checkpoint cell per
-TODO 1-9 (`# Hard-stop checkpoint: TODO n`), and no outputs; the two differ only in TODO cells
+the answer key has no stub; the student notebook has exactly 7 stubs, one checkpoint cell per
+TODO 1-8 (`# Hard-stop checkpoint: TODO n`), and no outputs; the two differ only in TODO cells
 and the title/glance banners.
 
 Run from the repository root:
@@ -33,7 +33,7 @@ REQUIRED_SYMBOLS = (
     "retrieve_tools",
     "tool_list_skills",
 )
-EXPECTED_STUBS = 8
+EXPECTED_STUBS = 7
 # A stub is a cell that *raises* NotImplementedError (a checkpoint may merely mention it).
 STUB_RE = re.compile(r"raise\s+NotImplementedError")
 # A checkpoint cell has a comment line that opens with the marker (stubs only *mention* it).
@@ -42,7 +42,7 @@ CHECKPOINT_RE = re.compile(r"(?m)^#\s*Hard-stop checkpoint")
 TODO_CELL_RE = re.compile(r"(?m)^\s*#\s*TODO [1-9]\b")
 # The answer key's title and overview cells say it is the answer key.
 BANNER_RE = re.compile(r"^(# Financial Data Agent Workshop|## At a glance)")
-TODOS = range(1, 10)  # each TODO has exactly one checkpoint cell (TODO 1 is inline)
+TODOS = range(1, 9)  # each TODO has exactly one checkpoint cell (TODO 1 is inline)
 # A literal OCI/OpenAI-style key assigned in notebook source. The notebooks must
 # prompt for (or read from the environment) credentials, never embed them.
 SECRET_RE = re.compile(r'(?:OCI_GENAI_API_KEY|OPENAI_API_KEY|TAVILY_API_KEY)"\]\s*=\s*"(?:sk|tvly)-[A-Za-z0-9_-]{16,}"')

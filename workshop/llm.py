@@ -96,3 +96,12 @@ def make_chat(provider, model, rotator=None, endpoint="", compartment=""):
         return _retry_rate_limit(call)
 
     return llm, chat
+
+
+def check_bare_question(question, answer):
+    """Checkpoint for TODO 1: a bank-data question was asked and the bare model answered."""
+    assert question.strip(), "❌ TODO 1: set QUESTION to a question first."
+    assert any(w in question.lower() for w in ("meridian", "finance", "customer", "account", "transaction", "alert")), \
+        "❌ TODO 1: ask about Meridian Bank data (a customer, account, transaction or alert)."
+    assert answer, "❌ TODO 1: the model returned no answer. Check your key and LLM_MODEL."
+    print("✅ TODO 1 passed: the bare model answered, with no access to the bank data.")

@@ -114,8 +114,7 @@ def figure_cell(svg: str, name: str, alt: str, number: str, caption: str) -> dic
     """jnb-figure markup with an inline data-URI <img>: JupyterLab's markdown attachment
     resolver rejects image/svg+xml ("Cannot render unknown image mime type")."""
     b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
-    cap = (f'<figcaption><span class="jnb-fignum">Figure {number}</span> '
-           f'{_caption_html(caption)}</figcaption>')
+    cap = f'<figcaption>{_caption_html(caption)}</figcaption>'
     img = (f'<img src="data:image/svg+xml;base64,{b64}" alt="{html.escape(alt, quote=True)}" '
            f'style="max-width:100%;height:auto">')
-    return {"source": f'<figure class="jnb-figure">\n\n{img}\n\n{cap}\n\n</figure>'}
+    return {"source": f'<figure class="jnb-figure" data-fig="{number}">\n\n{img}\n\n{cap}\n\n</figure>'}

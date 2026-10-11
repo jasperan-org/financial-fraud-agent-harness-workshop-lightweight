@@ -2,7 +2,7 @@
   {
     "number": "4.1",
     "svg": "fig-4.1-toolbox-flow.svg",
-    "caption": "Lane A happens once per tool; lane B on every turn. Both meet in the <code>toolbox</code> table, where tools are stored."
+    "caption": "Lane A happens once per tool, when it is added. Lane B happens on every turn and shows the agent only the few tools closest to the question. Both meet in the <code>toolbox</code> table, where tools are stored."
   },
   {
     "number": "4.2",
@@ -22,7 +22,7 @@
   {
     "number": "5.3",
     "svg": "fig-5.3-agent-loop.svg",
-    "caption": "Flow of one agent turn (TODO 9). Look at the highlighted branch where the model requests tools; the red path is the forced final answer."
+    "caption": "Flow of one agent turn (TODO 8). The highlighted branch, where the model requests tools, is the part you write; the red path is the forced final answer."
   },
   {
     "number": "5.4",

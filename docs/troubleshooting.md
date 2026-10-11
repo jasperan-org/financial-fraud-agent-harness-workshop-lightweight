@@ -157,9 +157,9 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 **Symptom:** You run the whole notebook and it halts early with a red cell, usually `TODO 1` or a `NotImplementedError`.
 
-**Cause:** That is the workshop. The eight TODO stubs raise on purpose and every TODO has a hard-stop assert below it, so you cannot barrel forward with a half-built harness.
+**Cause:** That is the workshop. The seven TODO stubs raise on purpose and every TODO has a hard-stop assert below it, so you cannot barrel forward with a half-built harness.
 
-**Fix:** Work top to bottom and implement each TODO in place; or open `notebook_complete.ipynb`, which is the same notebook with all nine solved. Nothing is broken and no state is corrupted by stopping there.
+**Fix:** Work top to bottom and implement each TODO in place; or open `notebook_complete.ipynb`, which is the same notebook with all eight solved. Nothing is broken and no state is corrupted by stopping there.
 
 ---
 
@@ -274,7 +274,7 @@ retrieve_knowledge("table", k=5)  # no kinds filter
 2. **Append `assistant_message(msg)`** to `messages`
 3. For each `tc` in `msg.tool_calls`, append a `tool` message with `tool_call_id=tc.id` (`call_tool` runs it)
 
-See [§5.3 in the Part 5 guide](part-5-agent-loop.md#todo-9-agent_turn) for the exact pattern.
+See [§5.3 in the Part 5 guide](part-5-agent-loop.md#todo-8-agent_turn) for the exact pattern.
 
 ---
 

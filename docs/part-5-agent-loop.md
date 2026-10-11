@@ -34,7 +34,7 @@ The harness adds no code to enforce rule 7; the ranking comes from the prompt te
 
 The user's actual question is appended at the end. The model sees one cohesive user message, not three concatenated blocks.
 
-## TODO 9: `agent_turn`
+## TODO 8: `agent_turn`
 
 §5.3. The helpers `start_turn`, `budgeted_steps` and `end_turn` (in `workshop/loop.py`) are given; you write the loop body.
 
@@ -42,11 +42,10 @@ The user's actual question is appended at the end. The model sees one cohesive u
 - `budgeted_steps` yields step numbers up to `max_iterations` and stops once `budget_seconds` has passed.
 - `end_turn` forces a final answer if the loop produced none, stores the exchange and returns the answer.
 
-One pass of the loop:
+Each pass asks the model (`msg = chat(messages, tools=tool_schemas).choices[0].message`) and exits with `final = msg.content or ""` plus `break` when there are no `msg.tool_calls`; both are given. You write the branch for tool requests:
 
-1. `msg = chat(messages, tools=tool_schemas).choices[0].message`.
-2. No `msg.tool_calls`: set `final = msg.content or ""` and `break`.
-3. Otherwise append `assistant_message(msg)`, then for each `tc` in `msg.tool_calls` append `{"role": "tool", "tool_call_id": tc.id, "content": call_tool(TOOLS, tc, step, verbose, offload)}`.
+1. `messages.append(assistant_message(msg))`: record the model's request first, so every tool result that follows has its matching call before it.
+2. For each `tc` in `msg.tool_calls`, append `{"role": "tool", "tool_call_id": tc.id, "content": call_tool(TOOLS, tc, step, verbose, offload)}`: `role` marks a tool result, `tool_call_id` links it to the request it answers, `content` is the text `call_tool` returns after running the tool.
 
 **Solution:**
 
@@ -61,8 +60,9 @@ def agent_turn(user_query, thread_id="default", max_iterations=8, budget_seconds
             final = msg.content or ""
             break
         messages.append(assistant_message(msg))
-        messages += [{"role": "tool", "tool_call_id": tc.id, "content": call_tool(TOOLS, tc, step, verbose, offload)}
-                     for tc in msg.tool_calls]
+        for tc in msg.tool_calls:
+            messages.append({"role": "tool", "tool_call_id": tc.id,
+                             "content": call_tool(TOOLS, tc, step, verbose, offload)})
     return end_turn(store, chat, thread_id, user_query, final, messages, started, verbose)
 ```
 

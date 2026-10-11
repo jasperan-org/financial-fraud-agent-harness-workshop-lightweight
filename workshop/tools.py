@@ -181,7 +181,7 @@ def skill_manifest(conn, embed_model, query, k=3):
 
 
 def check_retrieve_tools(conn, register, tools, always_on, retrieve_tools):
-    """Checkpoint for TODO 6: register two probe tools, check the retrieval, then remove them."""
+    """Checkpoint for TODO 5: register two probe tools, check the retrieval, then remove them."""
     def tool_zz_currency(amount: float, currency: str) -> str:
         """Convert an amount between currencies using today's exchange rates."""
         return ""
@@ -196,12 +196,12 @@ def check_retrieve_tools(conn, register, tools, always_on, retrieve_tools):
         register(tool_zz_currency)
         register(tool_zz_logs)
         got = names(retrieve_tools("convert euros to dollars using exchange rates", k=1))
-        assert "zz_currency" in got, f"❌ TODO 6: the closest tool is missing (got {got})."
-        assert "zz_logs" not in got, "❌ TODO 6: return only the k closest tools plus the always-on ones."
+        assert "zz_currency" in got, f"❌ TODO 5: the closest tool is missing (got {got})."
+        assert "zz_logs" not in got, "❌ TODO 5: return only the k closest tools plus the always-on ones."
         always_on.update(probes)
         got = names(retrieve_tools("convert euros to dollars using exchange rates", k=1))
-        assert "zz_logs" in got, "❌ TODO 6: always-on tools must be added to the k closest."
-        assert len(got) == len(set(got)), "❌ TODO 6: list each tool once."
+        assert "zz_logs" in got, "❌ TODO 5: always-on tools must be added to the k closest."
+        assert len(got) == len(set(got)), "❌ TODO 5: list each tool once."
     finally:
         always_on.difference_update(probes)
         for name in probes:
@@ -209,20 +209,34 @@ def check_retrieve_tools(conn, register, tools, always_on, retrieve_tools):
         with conn.cursor() as cur:
             cur.execute("DELETE FROM toolbox WHERE name IN (:a, :b)", a=probes[0], b=probes[1])
         conn.commit()
-    print("✅ TODO 6 passed: retrieve_tools returns the closest tools plus the always-on ones.")
+    print("✅ TODO 5 passed: retrieve_tools returns the closest tools plus the always-on ones.")
 
 
 def check_skill_search(conn, embed_model, tool_list_skills):
-    """Checkpoint for TODO 8: the tool returns ranked skills, the same order the manifest uses."""
+    """Checkpoint for TODO 7: the tool returns ranked skills, the same order the manifest uses."""
     query = "discover the schema of an Oracle database"
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM skillbox")
         count = cur.fetchone()[0]
-    assert count, "❌ TODO 8: the skillbox is empty; seed it before this check."
+    assert count, "❌ TODO 7: the skillbox is empty; seed it before this check."
     hits = json.loads(tool_list_skills(query, k=3))
-    assert isinstance(hits, list) and len(hits) == min(3, count), "❌ TODO 8: return a JSON array of k skills."
-    assert {"name", "category", "description"} <= set(hits[0]), "❌ TODO 8: each hit needs name, category, description."
-    assert len(json.loads(tool_list_skills(query, k=1))) == 1, "❌ TODO 8: honour k."
+    assert isinstance(hits, list) and len(hits) == min(3, count), "❌ TODO 7: return a JSON array of k skills."
+    assert {"name", "category", "description"} <= set(hits[0]), "❌ TODO 7: each hit needs name, category, description."
+    assert len(json.loads(tool_list_skills(query, k=1))) == 1, "❌ TODO 7: honour k."
     first = skill_manifest(conn, embed_model, query, k=3).splitlines()[1]
-    assert first.startswith(f"  - {hits[0]['name']} "), "❌ TODO 8: order skills by cosine distance, best first."
-    print("✅ TODO 8 passed: tool_list_skills returns ranked skills.")
+    assert first.startswith(f"  - {hits[0]['name']} "), "❌ TODO 7: order skills by cosine distance, best first."
+    print("✅ TODO 7 passed: tool_list_skills returns ranked skills.")
+
+
+def check_run_sql(TOOLS, tool_run_sql):
+    """Hard-stop checkpoint for TODO 6: tool_run_sql is registered, read-only and returns JSON."""
+    assert "run_sql" in TOOLS, "❌ TODO 6: keep the @register decorator."
+    out = json.loads(tool_run_sql("SELECT level AS n FROM dual CONNECT BY level <= 5", max_rows=2))
+    assert out.get("columns") == ["N"] and out.get("row_count") == 2, \
+        f"❌ TODO 6: run the SQL and return wt.rows_json(cur, max_rows) (columns + at most max_rows rows), got {out}."
+    assert json.loads(tool_run_sql("WITH t AS (SELECT 1 AS x FROM dual) SELECT x FROM t")).get("row_count") == 1, \
+        "❌ TODO 6: WITH statements must run."
+    assert "error" in json.loads(tool_run_sql("DROP TABLE x")), "❌ TODO 6: the read-only guard let a DROP through."
+    assert "error" in json.loads(tool_run_sql("SELECT * FROM no_such_table_xyz")), \
+        "❌ TODO 6: a database error must come back as {\"error\": ...}."
+    print("✅ TODO 6 passed: tool_run_sql is registered, read-only and returns JSON.")

@@ -5,7 +5,7 @@ when asked; this part runs the same harness as an AML desk — it reads incoming
 `FINANCE`, decides what the bank should do (**with a reason and a confidence**), records the decision
 where a human can replay it, and reports what the run was worth.
 
-There is no TODO in this part. It runs the harness from the nine TODOs.
+There is no TODO in this part. It runs the harness from the eight TODOs.
 
 Start here: **`notebook_student.ipynb` §6.1–§6.4** (or `notebook_complete.ipynb` for the
 solved run). This guide is the reference for what each cell does and why.
@@ -120,7 +120,7 @@ The model returns JSON. The harness validates it and enforces two rules:
 
 ### `triage_alert` (§6.3)
 
-One alert in, one ledger row and one memory out. It calls **`agent_turn`** — the loop from TODO 9 —
+One alert in, one ledger row and one memory out. It calls **`agent_turn`** — the loop from TODO 8 —
 unchanged: same context assembly, same tool dispatch, same iteration and wall-clock budgets.
 Autonomy is not a different loop; it is the same loop with a trigger and a record.
 
@@ -214,7 +214,7 @@ the vocabulary. That is the intended fallback, not a bug: read the `rationale` c
 happens often, lower the temperature of your model or shrink the evidence pack.
 
 **Every alert failed with a stub error** — a TODO is still unimplemented. Part 6 calls
-`agent_turn`, `retrieve_tools`, `retrieve_knowledge`, and `tool_run_sql`; finish TODOs 1–9 first, or run
+`agent_turn`, `retrieve_tools`, `retrieve_knowledge`, and `tool_run_sql`; finish TODOs 1–8 first, or run
 `notebook_complete.ipynb`.
 
 **Triage is slow / hits rate limits** — each alert is a bounded multi-step loop (context build, tool

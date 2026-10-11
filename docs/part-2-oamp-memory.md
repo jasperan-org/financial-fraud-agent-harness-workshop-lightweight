@@ -40,15 +40,19 @@ memory_client = OracleAgentMemory(
 
 §2.2. OAMP stores a fact with `add_memory` and finds it by meaning with `search`. Wrap `search` in `recall_memories(query, k=3, kind=None)` so later parts call one function.
 
-Steps: call `memory_client.search(query, user_id=USER_ID, agent_id=AGENT_ID, record_types=["memory"], metadata_filter=..., max_results=k)`; the filter is `{"kind": kind}` when `kind` is given, else `None`; return one dict per hit with `id`, `kind`, `subject`, `body`, `distance`.
+Steps (two lines; the loop that turns hits into dicts is already written):
+
+1. `flt` is the metadata filter: `{"kind": kind}` when `kind` is given, otherwise `None`.
+2. `hits = memory_client.search(query, ...)` with these keyword arguments: `user_id=USER_ID`, `agent_id=AGENT_ID` (whose memories to search); `record_types=["memory"]` (stored facts only, not chat messages); `metadata_filter=flt` (a dict a memory's metadata must match, `None` = no filter); `max_results=k` (how many hits to return).
 
 **Solution:**
 
 ```python
 def recall_memories(query, k=3, kind=None):
+    flt = {"kind": kind} if kind else None
     hits = memory_client.search(
         query, user_id=USER_ID, agent_id=AGENT_ID, record_types=["memory"],
-        metadata_filter={"kind": kind} if kind else None, max_results=k)
+        metadata_filter=flt, max_results=k)
     return [{"id": h.id, "kind": (h.metadata or {}).get("kind"),
              "subject": (h.metadata or {}).get("subject"),
              "body": h.content, "distance": h.distance} for h in hits]
@@ -103,34 +107,29 @@ SELECT t.table_name, tc.comments, t.num_rows, t.last_analyzed
 
 > `"Table FINANCE.TRANSACTIONS. Documented purpose: Card/account transactions. Approximate row count: 23606. Statistics last gathered at 2026-05-09 12:34:00."`
 
-Concatenate the parts conditionally — skip the comment line if there's no comment, skip the row count if `num_rows` is `None`, etc.
+The cursor, the loop, the first sentence, the "Documented purpose" example and the statistics sentence are already written. You add two things (about 3 lines):
+
+1. Following the "Documented purpose" example: when `num_rows` is not `None`, append the sentence `Approximate row count: {num_rows:,}.` to `parts` (`:,` adds thousands commas).
+2. Append one `Fact` to `facts`: `Fact(kind, subject, body, metadata)` with kind `"table"`, subject `"{owner}.{table}"`, the `body` string, and a metadata dict with keys `owner`, `table`, `num_rows` and `has_comment` (`bool(comment)`).
 
 **Solution:**
 
 ```python
 def _scan_tables(conn, owner: str) -> list[Fact]:
-    facts: list[Fact] = []
+    facts = []
     with conn.cursor() as cur:
         cur.execute(TABLES_SQL, owner=owner.upper())
         for table, comment, num_rows, last_analyzed in cur:
-            body_parts = [f"Table {owner}.{table}."]
+            parts = [f"Table {owner}.{table}."]
             if comment:
-                body_parts.append(f"Documented purpose: {comment}")
+                parts.append(f"Documented purpose: {comment}")
             if num_rows is not None:
-                body_parts.append(f"Approximate row count: {num_rows:,}.")
+                parts.append(f"Approximate row count: {num_rows:,}.")
             if last_analyzed:
-                body_parts.append(f"Statistics last gathered at {last_analyzed}.")
-            facts.append(Fact(
-                kind="table",
-                subject=f"{owner}.{table}",
-                body=" ".join(body_parts),
-                metadata={
-                    "owner": owner,
-                    "table": table,
-                    "num_rows": num_rows,
-                    "has_comment": bool(comment),
-                },
-            ))
+                parts.append(f"Statistics last gathered at {last_analyzed}.")
+            body = " ".join(parts)
+            facts.append(Fact("table", f"{owner}.{table}", body,
+                              {"owner": owner, "table": table, "num_rows": num_rows, "has_comment": bool(comment)}))
     return facts
 ```
 
@@ -207,7 +206,7 @@ The workshop uses links in four places:
 - **`link_memories(source, target, link_type)`** — connects two facts the agent already knows; `supports` / `contradicts` keep both current (§4.3).
 - **`search_knowledge(follow_links=True)`** — the app's variant: adds one hop of linked context to every hit (`app/backend/agent/tools.py`). The same traversal is `memory_client.search(..., num_hops=1, max_linked_results=…)`.
 
-The notebook links scanner facts (§2.4); relation types, hop traversal, memory types (`guideline` / `preference`) and retention (`ttl_days` → `EXPIRES_AT`) are reference material here, used by the app.
+The notebook links scanner facts (§2.3); relation types, hop traversal, memory types (`guideline` / `preference`) and retention (`ttl_days` → `EXPIRES_AT`) are reference material here, used by the app.
 
 The right-side Memory Context pane renders relations as `→ relation` / `← relation` chips under each
 memory, with retired ones struck through.

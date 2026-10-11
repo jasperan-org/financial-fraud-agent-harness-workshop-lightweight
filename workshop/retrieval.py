@@ -32,7 +32,6 @@ def make_reranker(conn):
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM user_mining_models WHERE model_name = :m", m=RERANKER_MODEL)
         loaded = cur.fetchone()[0] > 0
-    print(f"reranker loaded: {loaded}")
 
     def rerank(query, candidates, top_k=5, content_key="body"):
         if not candidates or not loaded:
@@ -147,3 +146,34 @@ def mirror_writes(write_facts, vs, client, user_id, agent_id):
         refresh_text_index(vs.client)
         return counts
     return write_and_index
+
+
+def prepare_search(conn, vs, scanner, client, user_id, agent_id):
+    """Set up search over knowledge_vs: HNSW + Oracle Text indexes, the in-DB reranker, and mirrored writes.
+
+    After this, scanner.write_facts (and so run_scan) also updates knowledge_vs. Returns (rerank, write_facts).
+    """
+    from langchain_oracledb.retrievers.text_search import create_text_index
+    from langchain_oracledb.vectorstores.oraclevs import create_index
+
+    create_index(conn, vs, params={"idx_name": "AML_KNOWLEDGE_HNSW", "idx_type": "HNSW"})
+    create_text_index(conn, TEXT_INDEX, vector_store=vs)   # keyword search, used by 3.3
+    scanner.write_facts = mirror_writes(scanner.write_facts, vs, client, user_id, agent_id)
+    return make_reranker(conn), scanner.write_facts
+
+
+def check_retrieve_knowledge(retrieve_knowledge):
+    """Checkpoint for TODO 4."""
+    _q = "how are transaction amounts stored"
+    _hits = retrieve_knowledge(_q, k=3, kinds="column")
+    assert _hits, "❌ TODO 4: retrieve_knowledge returned no hits."
+    assert {"kind", "subject", "body", "metadata", "distance"} <= _hits[0].keys(), "❌ TODO 4: each hit needs kind, subject, body, metadata, distance."
+    assert all(h["kind"] == "column" for h in _hits), "❌ TODO 4: the kinds filter was not applied (pass filter=flt to the search)."
+    assert len(_hits) <= 3, "❌ TODO 4: return at most k hits."
+    _two = retrieve_knowledge(_q, k=6, kinds="column,policy")
+    assert _two and {h["kind"] for h in _two} <= {"column", "policy"}, "❌ TODO 4: 'a,b' must split into two kinds."
+    _pol = retrieve_knowledge("structuring cash deposits below the reporting threshold", k=3, kinds=["policy"])
+    assert _pol and all(h["kind"] == "policy" for h in _pol), "❌ TODO 4: kinds may also be a list."
+    assert len(retrieve_knowledge(_q, k=3)) == 3, "❌ TODO 4: without kinds (flt = None), return k hits from every kind."
+    assert len(retrieve_knowledge(_q, k=1)) == 1, "❌ TODO 4: k=1 must return exactly one hit."
+    print("✅ TODO 4 passed: retrieve_knowledge filters by kind and returns at most k hits.")

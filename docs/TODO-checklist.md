@@ -1,6 +1,6 @@
 # Workshop TODO checklist
 
-`notebook_student.ipynb` has nine TODOs: TODO 1 is an inline prompt, TODOs 2–9 are stubs. Each has one checkpoint cell that prints a single ✅/❌ line and fails on the stub, on trivial returns and on the obvious bug. Each stub's comment block holds its signature, steps and checkpoint. `Run All` is supposed to halt at the first unfinished TODO. Answers: `notebook_complete.ipynb`.
+`notebook_student.ipynb` has eight TODOs: TODO 1 is an inline prompt, TODOs 2–8 are stubs. Each has one checkpoint cell that prints a single ✅/❌ line and fails on the stub, on trivial returns and on the obvious bug. Each stub's comment block holds its signature, steps and checkpoint. `Run All` is supposed to halt at the first unfinished TODO. Answers: `notebook_complete.ipynb`.
 
 | TODO | Name | Section | Guide |
 |---|---|---|---|
@@ -8,11 +8,12 @@
 | 2 | `recall_memories` | §2.2 | [part-2-oamp-memory.md](part-2-oamp-memory.md#todo-2-recall_memories) |
 | 3 | `_scan_tables` | §2.3 | [part-2-oamp-memory.md](part-2-oamp-memory.md#todo-3-_scan_tables) |
 | 4 | `retrieve_knowledge` | §3.2 | [part-3-retrieval.md](part-3-retrieval.md#todo-4-retrieve_knowledge) |
-| 5 | `hybrid_search_knowledge` | §3.3 | [part-3-retrieval.md](part-3-retrieval.md#todo-5-hybrid_search_knowledge) |
-| 6 | `retrieve_tools` | §4.1 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-6-retrieve_tools) |
-| 7 | `tool_run_sql` | §4.2 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-7-tool_run_sql) |
-| 8 | `tool_list_skills` | §4.4 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-8-tool_list_skills) |
-| 9 | `agent_turn` | §5.3 | [part-5-agent-loop.md](part-5-agent-loop.md#todo-9-agent_turn) |
+| 5 | `retrieve_tools` | §4.1 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-5-retrieve_tools) |
+| 6 | `tool_run_sql` | §4.2 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-6-tool_run_sql) |
+| 7 | `tool_list_skills` | §4.4 | [part-4-tools-and-skills.md](part-4-tools-and-skills.md#todo-7-tool_list_skills) |
+| 8 | `agent_turn` | §5.3 | [part-5-agent-loop.md](part-5-agent-loop.md#todo-8-agent_turn) |
+
+§3.3 (`hybrid_search_knowledge`) is provided: run it, no TODO.
 
 Part 6 ([guide](part-6-autonomous-aml-triage.md)) has no TODO: it runs the harness you built.
 
@@ -24,7 +25,7 @@ Part 6 ([guide](part-6-autonomous-aml-triage.md)) has no TODO: it runs the harne
 - [ ] The kernel is the Python 3.11 workshop kernel with the packages from `requirements.txt`.
 - [ ] §1.2 preflight is green. Each ❌ row prints its own fix; only a missing `FINANCE` or embedder stops the notebook.
 
-## After the nine TODOs
+## After the eight TODOs
 
 - [ ] Run the three-turn demo in §5.4 (discovery, live SQL, correction).
 - [ ] Open the app at `http://localhost:3000`.

@@ -26,20 +26,21 @@ We still always include a small **always-on** set. In the notebook that is `run_
 
 Every tool needs a docstring: it is the text that gets embedded and the description the model sees.
 
-## TODO 6: `retrieve_tools`
+## TODO 5: `retrieve_tools`
 
 §4.1. Rank the `toolbox` rows by cosine distance to the query, rerank the shortlist, then add the always-on tools so the model never loses the core set.
 
-Steps: fetch `k * 4` rows `(name, description)` ordered by `VECTOR_DISTANCE(embedding, VECTOR_EMBEDDING(... USING :q AS DATA), COSINE)` (`wt.lob_text` turns a CLOB into `str`); `rerank(query, rows, top_k=k, content_key="content")`; keep names present in `TOOLS` and union in `ALWAYS_ON_TOOLS` without duplicates; return their schemas.
+The cell gives you `_TOOL_SQL` (closest tools first: `VECTOR_DISTANCE` between each stored tool embedding and the embedding the database makes of `:q`, first `:n` rows), the `rows` list and the final return (names from `best` plus `ALWAYS_ON_TOOLS`, deduplicated with `dict.fromkeys`, mapped to `TOOLS[name][1]`). You write two lines: run `_TOOL_SQL` on the cursor with `:q` = the query text and `:n` = `k * 4` (extra candidates for the reranker), and `best = rerank(query, rows, top_k=k, content_key="content")` (`top_k` = how many to keep, `content_key` = the dict key holding the text to compare).
 
 **Solution:**
 
 ```python
+_TOOL_SQL = ("SELECT name, description FROM toolbox ORDER BY VECTOR_DISTANCE(embedding, "
+             f"VECTOR_EMBEDDING({ONNX_EMBED_MODEL} USING :q AS DATA), COSINE) FETCH FIRST :n ROWS ONLY")
+
 def retrieve_tools(query, k=6):
     with agent_conn.cursor() as cur:
-        cur.execute("SELECT name, description FROM toolbox ORDER BY VECTOR_DISTANCE(embedding, "
-                    f"VECTOR_EMBEDDING({ONNX_EMBED_MODEL} USING :q AS DATA), COSINE) FETCH FIRST :n ROWS ONLY",
-                    q=query, n=k * 4)
+        cur.execute(_TOOL_SQL, q=query, n=k * 4)
         rows = [{"name": n, "content": wt.lob_text(d)} for n, d in cur]
     best = rerank(query, rows, top_k=k, content_key="content")
     return [TOOLS[n][1] for n in dict.fromkeys([r["name"] for r in best] + sorted(ALWAYS_ON_TOOLS)) if n in TOOLS]
@@ -47,7 +48,7 @@ def retrieve_tools(query, k=6):
 
 The checkpoint right after `retrieve_tools` runs before any tool is registered, so it checks the return type and that every schema belongs to `TOOLS`. The `tool_run_sql` checkpoint then verifies that `run_sql` is retrievable.
 
-## TODO 7: `tool_run_sql`
+## TODO 6: `tool_run_sql`
 
 §4.2. `run_sql` is the agent's way to query live data. It must be read-only: `SELECT` and `WITH` only. `_READ_ONLY` is pre-defined:
 
@@ -55,7 +56,7 @@ The checkpoint right after `retrieve_tools` runs before any tool is registered, 
 _READ_ONLY = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 ```
 
-Steps: reject statements that do not match `_READ_ONLY` with an error JSON; execute on `agent_conn`; return `wt.rows_json(cur, max_rows)`, which gives `{"columns": [...], "rows": [...], "row_count": N}`; wrap the execute so any database error returns `{"error": "..."}`. Keep `@register` and the docstring.
+The try/except (any database error comes back as `{"error": "..."}`) and the cursor `with` are given. You write three lines: if `_READ_ONLY.match(sql.strip())` finds no match, return `json.dumps({"error": ...})`; inside the `with`, run `sql` on `cur` and return `wt.rows_json(cur, max_rows)`, which gives `{"columns": [...], "rows": [...], "row_count": N}`.
 
 **Solution:**
 
@@ -69,20 +70,9 @@ def tool_run_sql(sql: str, max_rows: int = 50) -> str:
         with agent_conn.cursor() as cur:
             cur.execute(sql)
             return wt.rows_json(cur, max_rows)
-    except Exception as e:
+    except Exception as e:   # any database error goes back to the agent as JSON
         return json.dumps({"error": str(e)})
 ```
-
-Notes:
-
-- **The docstring is the tool description.** It tells the LLM *when* to call this tool, not just *how*. Prefer "Use this when..." phrasing.
-- **`rows_json` serialises with `default=str`**, which handles `datetime`, `Decimal`, etc. that aren't JSON-native. Without this, dates raise `TypeError`.
-- **Error handling returns JSON.** The LLM reads the tool output as a string; an error in JSON form is something it can react to ("the column doesn't exist, let me check the schema").
-- **The regex is a first fence, not the boundary.** It does not parse SQL. What actually stops a hostile query is the kernel: the identity policies ([Deep Data Security reference](reference/deep-data-security.md)) decide which rows come back, and the app runs every `run_sql` on a private READ ONLY session (`identity_session` in `app/backend/db/deep_security.py`) with a denylist for dynamic-SQL packages and `FOR UPDATE`. The notebook leaves `agent_conn` alone because OAMP's background writes share it.
-
-After this cell runs, `tool_run_sql` is in the `TOOLS` registry and a row in the `toolbox` table.
-
-> **Note** `run_sql` is the one tool whose *results* depend on who is asking. The [Deep Data Security reference](reference/deep-data-security.md) wires an end-user context into it (`AGENT.set_eda_ctx`) so the database — not this function — decides which rows and columns come back. The notebook does not use that wiring.
 
 ## The core toolset (§4.3)
 
@@ -96,7 +86,7 @@ After this cell runs, `tool_run_sql` is in the `TOOLS` registry and a row in the
 | `link_memories(source, target, link_type, reason)` | Connect two memories the agent already knows (`supports`/`contradicts` keep both current). | notebook |
 | `load_skill(name)` | Read a skill body from the skillbox. | notebook |
 | `fetch_tool_output(tool_call_id)` | Recover a tool output that the loop replaced with a truncation marker (§5.5). | notebook |
-| `list_skills(query)` | Discover a skill by meaning (`tool_list_skills`, TODO 8). | notebook |
+| `list_skills(query)` | Discover a skill by meaning (`tool_list_skills`, TODO 7). | notebook |
 | `focus_world(target_kind, target, altitude)` | Resolve a branch, merchant, customer or region to a globe anchor; the app emits the camera move. | app |
 | `exec_js(code)` | JavaScript inside Oracle MLE ([reference](reference/mle.md)). | app |
 | `merchants_near(place, radius_km)` | Oracle Spatial: merchants within a radius of a branch city (`SDO_WITHIN_DISTANCE`). | app |
@@ -129,21 +119,23 @@ The provisioning scripts mirror them into `skillbox` with their content SHA, so 
 
 The model sees the menu without paying for the meal.
 
-## TODO 8: `tool_list_skills`
+## TODO 7: `tool_list_skills`
 
 §4.4. `load_skill(name)` reads a skill body once the model knows the name. `tool_list_skills(query, k)` is the discovery half: cosine search over `skillbox.embedding`, the same primitive as the toolbox lookup.
 
-Steps: select `name, category, description` from `skillbox` ordered by `VECTOR_DISTANCE(embedding, VECTOR_EMBEDDING(... USING :q AS DATA), COSINE)` and `FETCH FIRST :k ROWS ONLY`; return a JSON list of `{"name", "category", "description"}`, best match first.
+The cell gives you `_SKILL_SQL` (closest skills first, `:q` = search text, `:k` = row count) and the final `json.dumps(hits)`. You write two lines: run `_SKILL_SQL` with `q=query, k=k`, and build `hits`, one `{"name", "category", "description"}` dict per `(name, category, description)` row, best match first (`wt.lob_text` turns the description CLOB into `str`).
 
 **Solution:**
 
 ```python
+_SKILL_SQL = ("SELECT name, category, description FROM skillbox ORDER BY VECTOR_DISTANCE(embedding, "
+              f"VECTOR_EMBEDDING({ONNX_EMBED_MODEL} USING :q AS DATA), COSINE) FETCH FIRST :k ROWS ONLY")
+
 @register
 def tool_list_skills(query: str, k: int = 5) -> str:
     """Search the skillbox semantically. Returns top-k skills (name + description)."""
     with agent_conn.cursor() as cur:
-        cur.execute("SELECT name, category, description FROM skillbox ORDER BY VECTOR_DISTANCE(embedding, "
-                    f"VECTOR_EMBEDDING({ONNX_EMBED_MODEL} USING :q AS DATA), COSINE) FETCH FIRST :k ROWS ONLY", q=query, k=k)
+        cur.execute(_SKILL_SQL, q=query, k=k)
         hits = [{"name": n, "category": c, "description": wt.lob_text(d)} for n, c, d in cur]
     return json.dumps(hits)
 ```

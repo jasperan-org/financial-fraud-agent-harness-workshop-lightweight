@@ -8,7 +8,7 @@
 
 `Agent = Model + Harness`. The model emits tokens; everything else — memory, retrieval, tool dispatch, identity, budgets — is harness code. This workshop builds that harness twice: from primitives in the notebook, and as a running product in [`app/`](app/).
 
-## The notebook: nine TODOs
+## The notebook: eight TODOs
 
 90-minute session (about 60 minutes hands-on). [`notebook_student.ipynb`](notebook_student.ipynb) builds the harness from primitives. Oracle is already provisioned (`.devcontainer/provision.sh` runs `app/scripts/bootstrap.py` → `seed.py` → `setup_advanced.py` → `setup_deep_security.py`, idempotently): the `AGENT` user, the in-database ONNX embedder (and the cross-encoder reranker when provisioned), the seeded `FINANCE` schema, the Oracle Text index and the skillbox. Each TODO has a checkpoint cell below it; `Run All` is supposed to halt at the first unfinished one.
 
@@ -16,9 +16,9 @@
 |---|---|---|
 | 1 | Setup, Oracle connectivity, chat client | 1 `QUESTION` |
 | 2 | Long-term memory with OAMP | 2 `recall_memories` · 3 `_scan_tables` |
-| 3 | Retrieval with langchain-oracledb | 4 `retrieve_knowledge` · 5 `hybrid_search_knowledge` |
-| 4 | Toolbox and skillbox | 6 `retrieve_tools` · 7 `tool_run_sql` · 8 `tool_list_skills` |
-| 5 | Context engineering and the agent loop | 9 `agent_turn` |
+| 3 | Retrieval with langchain-oracledb | 4 `retrieve_knowledge` (hybrid search is provided) |
+| 4 | Toolbox and skillbox | 5 `retrieve_tools` · 6 `tool_run_sql` · 7 `tool_list_skills` |
+| 5 | Context engineering and the agent loop | 8 `agent_turn` |
 | 6 | Autonomous AML triage (capstone) | none: run it |
 
 - Answers: [`notebook_complete.ipynb`](notebook_complete.ipynb), the same notebook solved, with outputs saved.
@@ -99,7 +99,7 @@ Then start the app in two terminals: `cd app/backend && python app.py` (→ :800
 
 | Path | What it is |
 |---|---|
-| `notebook_student.ipynb` | Nine TODOs (eight stubs plus the first prompt), a checkpoint per TODO, the Part 6 capstone |
+| `notebook_student.ipynb` | Eight TODOs (seven stubs plus the first prompt), a checkpoint per TODO, the Part 6 capstone |
 | `notebook_complete.ipynb` | The same notebook, solved, with outputs |
 | `app/` | The Meridian Bank AML app: Flask + Socket.IO backend, React + Vite front end, and the Oracle provisioning scripts (`bootstrap.py`, `seed.py`, `setup_advanced.py`, `setup_deep_security.py`) |
 | `docs/` | Part-by-part guides, `docs/reference/` for topics outside the notebook, the fraud one-pager, the TODO checklist, troubleshooting |

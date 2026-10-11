@@ -240,3 +240,42 @@ def format_scan(summary):
     return (f"scan: {summary['facts_total']} facts "
             f"({summary['new']} new, {summary['updated']} updated, {summary['skipped']} unchanged); "
             f"{summary['links_created']} links created, {summary['links_already_there']} already present")
+
+
+def check_recall_memories(recall_memories, client, user_id, agent_id, subject, query):
+    """Checkpoint for TODO 2: store one memory about `subject`, then recall it with `query`, which shares no words with it."""
+    if not find_memory(client, user_id, agent_id, "column", subject):   # add once, even if re-run
+        client.add_memory(
+            "Table FINANCE.TRANSACTIONS column AMOUNT_CENTS: amounts are stored in USD CENTS, never dollars.",
+            user_id=user_id, agent_id=agent_id, metadata={"kind": "column", "subject": subject})
+    hits = recall_memories(query, k=3, kind="column")
+    assert hits, ("❌ TODO 2: recall_memories returned nothing. Check that memory_client.search got user_id, "
+                  "agent_id, record_types=['memory'] and max_results=k, and that you filled in both TODO lines.")
+    assert all({"id", "kind", "subject", "body", "distance"} <= set(h) for h in hits), \
+        "❌ TODO 2: each hit needs the keys id, kind, subject, body, distance."
+    assert all(h["kind"] == "column" and h["body"] for h in hits), "❌ TODO 2: kind and body must come from the hit."
+    assert any(h["subject"] == subject for h in hits), "❌ TODO 2: the stored memory did not come back."
+    assert len(recall_memories(query, k=1, kind="column")) == 1, "❌ TODO 2: pass max_results=k to memory_client.search."
+    assert recall_memories(query, k=3, kind="no_such_kind") == [], \
+        '❌ TODO 2: set flt = {"kind": kind} when kind is given (else None) and pass metadata_filter=flt.'
+    print(f"   top hit: d={hits[0]['distance']:.4f}  {hits[0]['subject']}")
+    print("✅ TODO 2 passed: recalled the stored memory by meaning.")
+
+
+def check_scan_tables(scan_tables, conn, owner):
+    """Checkpoint for TODO 3: one table Fact per table in ALL_TABLES."""
+    facts = scan_tables(conn, owner)
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM all_tables WHERE owner = :o", o=owner.upper())
+        n_tables = cur.fetchone()[0]
+    assert facts, "❌ TODO 3: _scan_tables returned no facts. Did you fill in the facts.append(Fact(...)) line?"
+    assert all(isinstance(f, Fact) and f.kind == "table" for f in facts), "❌ TODO 3: append Fact objects whose kind is 'table'."
+    assert len(facts) == n_tables, "❌ TODO 3: return one Fact per table in ALL_TABLES."
+    txn = {f.subject: f for f in facts}.get(f"{owner}.TRANSACTIONS")
+    assert txn, f"❌ TODO 3: subject must be f'{{owner}}.{{table}}', e.g. {owner}.TRANSACTIONS."
+    assert txn.body.startswith(f"Table {owner}.TRANSACTIONS."), "❌ TODO 3: body must start with 'Table {owner}.{table}.'."
+    assert {"owner", "table", "num_rows", "has_comment"} <= set(txn.metadata), "❌ TODO 3: metadata needs owner, table, num_rows, has_comment."
+    assert ("Documented purpose:" in txn.body) == txn.metadata["has_comment"], "❌ TODO 3: add the purpose only when a comment exists."
+    assert ("Approximate row count:" in txn.body) == (txn.metadata["num_rows"] is not None), "❌ TODO 3: append the row-count sentence only when num_rows is not None."
+    assert not any("None" in f.body for f in facts), "❌ TODO 3: never write the word None into the body; skip the row-count sentence when num_rows is None."
+    print(f"✅ TODO 3 passed: one table Fact per table in {owner}.")
