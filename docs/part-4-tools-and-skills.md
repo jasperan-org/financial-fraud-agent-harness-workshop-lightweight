@@ -30,7 +30,7 @@ Every tool needs a docstring: it is the text that gets embedded and the descript
 
 §4.1. Rank the `toolbox` rows by cosine distance to the query, rerank the shortlist, then add the always-on tools so the model never loses the core set.
 
-The cell gives you `_TOOL_SQL` (closest tools first: `VECTOR_DISTANCE` between each stored tool embedding and the embedding the database makes of `:q`, first `:n` rows), the `rows` list and the final return (names from `best` plus `ALWAYS_ON_TOOLS`, deduplicated with `dict.fromkeys`, mapped to `TOOLS[name][1]`). You write two lines: run `_TOOL_SQL` on the cursor with `:q` = the query text and `:n` = `k * 4` (extra candidates for the reranker), and `best = rerank(query, rows, top_k=k, content_key="content")` (`top_k` = how many to keep, `content_key` = the dict key holding the text to compare).
+The cell gives you `_TOOL_SQL` (closest tools first: `VECTOR_DISTANCE` between each stored tool embedding and the embedding the database makes of `:q`, first `:n` rows), the `rows` list, the rerank call and the final return (names from `best` plus `ALWAYS_ON_TOOLS`, deduplicated with `dict.fromkeys`, mapped to `TOOLS[name][1]`). You write one line: `cur.execute(_TOOL_SQL, q=query, n=k * 4)`, where `:q` is the question and `:n` = `k * 4` fetches extra candidates for the reranker.
 
 **Solution:**
 
@@ -56,7 +56,7 @@ The checkpoint right after `retrieve_tools` runs before any tool is registered, 
 _READ_ONLY = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 ```
 
-The try/except (any database error comes back as `{"error": "..."}`) and the cursor `with` are given. You write three lines: if `_READ_ONLY.match(sql.strip())` finds no match, return `json.dumps({"error": ...})`; inside the `with`, run `sql` on `cur` and return `wt.rows_json(cur, max_rows)`, which gives `{"columns": [...], "rows": [...], "row_count": N}`.
+The read-only check, the try/except (any database error comes back as `{"error": "..."}`) and the cursor `with` are given. You write two lines inside the `with`: `cur.execute(sql)` and `return wt.rows_json(cur, max_rows)`, which gives `{"columns": [...], "rows": [...], "row_count": N}`.
 
 **Solution:**
 
@@ -123,7 +123,7 @@ The model sees the menu without paying for the meal.
 
 §4.4. `load_skill(name)` reads a skill body once the model knows the name. `tool_list_skills(query, k)` is the discovery half: cosine search over `skillbox.embedding`, the same primitive as the toolbox lookup.
 
-The cell gives you `_SKILL_SQL` (closest skills first, `:q` = search text, `:k` = row count) and the final `json.dumps(hits)`. You write two lines: run `_SKILL_SQL` with `q=query, k=k`, and build `hits`, one `{"name", "category", "description"}` dict per `(name, category, description)` row, best match first (`wt.lob_text` turns the description CLOB into `str`).
+The cell gives you `_SKILL_SQL` (closest skills first, `:q` = search text, `:k` = row count), the `hits` list (one `{"name", "category", "description"}` dict per row) and the final `json.dumps(hits)`. You write one line, the same pattern as TODO 5: `cur.execute(_SKILL_SQL, q=query, k=k)`.
 
 **Solution:**
 

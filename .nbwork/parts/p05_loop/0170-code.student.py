@@ -10,12 +10,12 @@ def agent_turn(user_query, thread_id="default", max_iterations=8, budget_seconds
         if not msg.tool_calls:      # the model answered: keep the text and stop looping
             final = msg.content or ""
             break
-        # TODO 8 (the model asked for tools; write this branch, about 3 lines):
-        # 1. messages.append(assistant_message(msg)): record the model's request first, so every tool result
-        #    that follows has the matching call before it (the API rejects a result without its call).
-        # 2. For each tc in msg.tool_calls, append one dict to messages with three keys:
-        #      "role": "tool"            marks it as a tool result,
-        #      "tool_call_id": tc.id     links it to the request it answers,
-        #      "content": call_tool(TOOLS, tc, step, verbose, offload)   runs the tool, returns its result text.
-        raise NotImplementedError("TODO 8: append assistant_message(msg), then one tool message per tc")
+        # The model asked for tools. First record its request, so each tool result below follows its call.
+        messages.append(assistant_message(msg))
+        # TODO 8 (two lines): run each requested tool and add its result to the conversation. Write:
+        #     for tc in msg.tool_calls:
+        #         messages.append({"role": "tool", "tool_call_id": tc.id, "content": <the tool's result>})
+        #   <the tool's result>  call_tool(TOOLS, tc, step, verbose, offload)   (runs the tool, returns its text)
+        #   "tool_call_id": tc.id links the result to the request it answers.
+        raise NotImplementedError("TODO 8: for each tc in msg.tool_calls, append its tool message")
     return end_turn(store, chat, thread_id, user_query, final, messages, started, verbose)
