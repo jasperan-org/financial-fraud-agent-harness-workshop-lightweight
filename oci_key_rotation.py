@@ -114,7 +114,23 @@ def _status_of(exc: BaseException) -> int | None:
 
 
 def classify_error(exc: BaseException) -> str:
-    """Return ``'rate_limit' | 'auth' | 'transient' | 'fatal'``."""
+    """Return ``'rate_limit' | 'auth' | 'transient' | 'fatal'``.
+
+    Wrappers that hide the HTTP status (OAMP raises a bare RuntimeError around litellm's
+    RateLimitError) are classified by the first cause in their chain that is not fatal.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        kind = _classify_one(current)
+        if kind != "fatal" or _status_of(current) is not None:
+            return kind
+        current = current.__cause__ or current.__context__
+    return "fatal"
+
+
+def _classify_one(exc: BaseException) -> str:
     status = _status_of(exc)
     if status == 429:
         return "rate_limit"

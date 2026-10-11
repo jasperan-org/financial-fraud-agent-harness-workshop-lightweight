@@ -102,6 +102,24 @@ def test_classify_error():
     assert kr.classify_error(ValueError("nope")) == "fatal"
 
 
+def wrapped(inner):
+    """What OAMP raises: a bare RuntimeError whose cause carries the provider error."""
+    try:
+        try:
+            raise inner
+        except BaseException as e:
+            raise RuntimeError("Chat Completions provider request failed.") from e
+    except RuntimeError as outer:
+        return outer
+
+
+def test_classify_error_follows_wrapped_cause():
+    assert kr.classify_error(wrapped(FakeAPIError(429))) == "rate_limit"
+    assert kr.classify_error(wrapped(FakeAPIError(401))) == "auth"
+    assert kr.classify_error(wrapped(FakeAPIError(400, "bad request"))) == "fatal"
+    assert kr.classify_error(wrapped(ValueError("nope"))) == "fatal"
+
+
 def test_rate_limit_goes_to_next_lane_without_key_sweep(tmp_path):
     router, _ = make_router(tmp_path)
     script = Script({"grok-phx": raises(429), "grok-chi": ok("chi"), "gptoss-chi": ok("oss")})
