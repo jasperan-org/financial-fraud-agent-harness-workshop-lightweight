@@ -1,4 +1,4 @@
-# Part 4: Toolbox and Skillbox
+# Part 4: The Toolbox and Skillbox Patterns
 
 The agent needs a way to *do things* in the world — execute SQL, run code, write to a scratchpad, fetch a document. In this harness:
 
