@@ -27,11 +27,10 @@ Part 6 ([guide](part-6-autonomous-aml-triage.md)) has no TODO: it runs the harne
 
 ## After the eight TODOs
 
-- [ ] Run the three-turn demo in §5.4 (discovery, live SQL, correction).
+- [ ] Run the two-turn demo in §5.4 (discovery, live SQL).
 - [ ] Open the app at `http://localhost:3000`.
 - [ ] Ask *"Which branch regions have the most FLAGGED or BLOCKED transactions?"*
 - [ ] Switch the header persona to **Analyst — Europe & Middle East** and re-ask; the rows change.
-- [ ] Open the memory pane and confirm the turn-3 correction is there.
 - [ ] As **Compliance Officer**, ask for Suspicious Activity Reports: all rows. As **Analyst (default)**, ask again: no rows. The database answered differently; nothing in the UI changed.
 
 ## Part 6 (capstone)

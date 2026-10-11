@@ -79,15 +79,14 @@ The checkpoint runs a short turn against the live model and fails on the stub, o
 
 If the loop exits without `final` (iterations or time exhausted), `end_turn` calls `force_final_answer`: one more call without tools, after appending "Budget exhausted. Provide your best answer now, no more tools." The user always gets an answer, even if the agent did not converge.
 
-## Three-turn demo (§5.4)
+## Two-turn demo (§5.4)
 
-Three turns on one thread, each exercising a different component:
+Two turns on one thread, each exercising a different component:
 
 1. **Turn 1 — discovery.** *"What's in the FINANCE schema? Briefly — list the entities and how they relate."* Forces `search_knowledge` over scanned facts.
 2. **Turn 2 — live data.** *"Which branch regions have the most FLAGGED or BLOCKED transactions?"* Forces `run_sql`.
-3. **Turn 3 — correction + persistence.** *"Important: `transactions.amount_cents` is always USD CENTS, never dollars. Save this as a correction by calling `remember` BEFORE you respond."* Forces `remember` and creates a persisted correction memory.
 
-After turn 3 the OAMP store holds a memory with `metadata.kind = "correction"`; later questions about amounts surface it through `search_knowledge`. Step counts and timings vary from run to run.
+Each turn is one `agent_turn` call, and each pass of its loop is one model request, so a turn that uses tools makes two or more. Step counts and timings vary from run to run. The `remember` tool (§4.3) saves corrections the same way when an analyst asks for one.
 
 ## Key takeaways: Part 5
 
