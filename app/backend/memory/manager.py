@@ -18,20 +18,15 @@ import threading
 
 import numpy as np
 
-import os
-
 from oracleagentmemory.core import OracleAgentMemory
-from oracleagentmemory.core.llms import Llm
 from oracleagentmemory.core.thread import BaseThread
 from oracleagentmemory.apis.embedders.embedder import IEmbedder
 
 from config import (
     AGENT_ID, USER_ID,
-    LLM_FALLBACK_MODEL, LLM_MODEL, LLM_PROVIDER,
-    OCI_GENAI_API_KEY, OCI_GENAI_ENDPOINT,
     ONNX_EMBED_DIM, ONNX_EMBED_MODEL,
-    OPENAI_API_KEY,
 )
+from oci_key_rotation import make_router_oamp_llm
 from db.connection import create_agent_pool
 
 # OAMP >= 26.6 names the managed DB objects from `memory_store_id`; the older
@@ -133,33 +128,17 @@ class OracleONNXEmbedder(IEmbedder):
 def build_extraction_llm():
     """LLM used by OAMP for memory extraction + context-summary refresh.
 
-    Mirrors agent/llm.py's OCI-first / OpenAI-fallback policy: try OCI when
-    LLM_PROVIDER=oci and credentials are present, otherwise (or on init
-    failure) build an OpenAI client on `LLM_FALLBACK_MODEL` (gpt-5.5).
-    Returns None if neither is available — caller disables extraction.
+    Routed through the app-wide ModelRouter (same cooldown state as chat).
+    Returns None if no lane is configured — caller disables extraction.
     """
-    if LLM_PROVIDER == "oci" and OCI_GENAI_API_KEY and OCI_GENAI_ENDPOINT:
-        try:
-            llm = Llm(
-                f"openai/{LLM_MODEL}",
-                api_base=OCI_GENAI_ENDPOINT,
-                api_key=OCI_GENAI_API_KEY,
-            )
-            print(f"[memory] OAMP extraction LLM = OCI {LLM_MODEL} @ {OCI_GENAI_ENDPOINT}")
-            return llm
-        except Exception as e:
-            print(f"[memory] OCI extraction LLM init failed: "
-                  f"{type(e).__name__}: {e}; falling back to OpenAI {LLM_FALLBACK_MODEL}.")
-
-    if OPENAI_API_KEY:
-        # litellm reads OPENAI_API_KEY from os.environ. Make sure it's set
-        # even if the .env loader stashed it only on os.environ via dotenv.
-        os.environ.setdefault("OPENAI_API_KEY", OPENAI_API_KEY)
-        print(f"[memory] OAMP extraction LLM = OpenAI {LLM_FALLBACK_MODEL}")
-        return Llm(LLM_FALLBACK_MODEL)
-
-    print("[memory] No usable LLM credentials — OAMP extraction DISABLED.")
-    return None
+    from agent.llm import get_router
+    try:
+        llm = make_router_oamp_llm(get_router())
+    except Exception as e:
+        print(f"[memory] No usable LLM — OAMP extraction DISABLED ({type(e).__name__}).")
+        return None
+    print("[memory] OAMP extraction LLM = shared model router")
+    return llm
 
 
 # --------------------------------------------------------------------------- #

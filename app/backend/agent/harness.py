@@ -129,26 +129,15 @@ def _emit_token_usage(socketio, sid, resp, step: int, llm_client=None) -> None:
     OpenAI-compatible endpoint returns the same shape. If the provider omits
     usage we send zeros so the front-end's running totals stay consistent.
 
-    `model` reflects the **active** provider's model at the time of the call —
-    so if the LlmRouter has silently fallen back from OCI grok-4.3 to OpenAI
-    gpt-5.5 (auth/404/network), the UI shows the model that actually served
-    this turn, not the originally-configured one.
+    `model` is always the router's primary model label; lane switches are
+    deliberately invisible to attendees (see oci_key_rotation.ModelRouter log).
     """
     if socketio is None:
         return
     usage = getattr(resp, "usage", None)
 
-    # Use the live router state when available; fall back to the static
-    # LLM_MODEL constant if the caller didn't pass the client through.
-    active_model = LLM_MODEL
-    using_fallback = False
-    if llm_client is not None and hasattr(llm_client, "info"):
-        try:
-            info = llm_client.info()
-            active_model = info.get("active_model") or LLM_MODEL
-            using_fallback = bool(info.get("using_fallback"))
-        except Exception:
-            pass
+    # Attendees always see the primary model label; lane switches are silent.
+    active_model = getattr(llm_client, "primary_model", None) or LLM_MODEL
 
     payload = {
         "step": step,
@@ -157,7 +146,6 @@ def _emit_token_usage(socketio, sid, resp, step: int, llm_client=None) -> None:
         "total": getattr(usage, "total_tokens", 0) or 0,
         "model": active_model,
         "model_max": LLM_MODEL_MAX_TOKENS,
-        "using_fallback": using_fallback,
     }
     _emit(socketio, "token_usage", payload, sid)
 

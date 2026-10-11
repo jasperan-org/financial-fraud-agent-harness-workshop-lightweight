@@ -7,4 +7,4 @@ AGENT_PASS = os.environ.get("ORACLE_AGENT_PASS", "AgentPwd_2025")
 DEMO_USER  = os.environ.get("ORACLE_DEMO_USER", "FINANCE")
 
 agent_conn = connect(AGENT_USER, AGENT_PASS, SYS_DSN)
-run_preflight(agent_conn, LLM_PROVIDER, OCI_ROTATOR)
+run_preflight(agent_conn, LLM_PROVIDER, OCI_ROUTER)

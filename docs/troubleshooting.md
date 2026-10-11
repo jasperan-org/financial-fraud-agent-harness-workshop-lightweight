@@ -139,6 +139,12 @@ Do not commit this to git. For permanent fixes, stop the Codespace, add the secr
 
 ---
 
+### Slow answers or 429s during a busy session (instructor)
+
+Grok-4.3 limits are per tenancy per region, so rotating keys cannot help. The router in `oci_key_rotation.py` instead falls back silently: `grok-phx` → `grok-chi` (Chicago keys) → `gptoss-chi` (`openai.gpt-oss-120b`). A rate-limited lane cools for `OCI_GENAI_FALLBACK_COOLDOWN_S` seconds (default 120), then calls return to it. Attendees see nothing; inspect what happened with `tail ~/.cache/fraud-workshop/llm-router.log` (override with `OCI_GENAI_ROUTER_LOG`; the app also prints `[llm-router] ...` lines). If the fallback secrets (`OCI_GENAI_FALLBACK_ENDPOINT`, `OCI_GENAI_FALLBACK_API_KEY..6`) are missing, only the Phoenix lane runs.
+
+---
+
 ### Jupyter kernel "Python 3.11" not found
 
 **Symptom:** The notebook asks you to select a kernel and Python 3.11 isn't listed.
@@ -181,7 +187,7 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 - *FINANCE tables / transactions / SAR reports* → the seed did not finish: `cd app && python scripts/bootstrap.py && python scripts/seed.py`.
 - *ONNX embedder missing* → `cd app && python scripts/bootstrap.py` (needs the `vector_memory_size` pool from the same script).
-- *credentials: 0 key(s)* → no OCI GenAI key reached the kernel's environment; add it as a Codespaces secret (then restart), or re-run §1.1 and paste the key at its prompt. (`app/.env` feeds the app, not the notebook kernel.)
+- *chat LLM: 0 lane(s)* → no OCI GenAI key reached the kernel's environment; add it as a Codespaces secret (then restart), or re-run §1.1 and paste the key at its prompt. (`app/.env` feeds the app, not the notebook kernel.)
 - *Oracle Text index absent* → informational: §3.1 creates it before the keyword leg needs it.
 
 The cell hard-fails only on a seeded `FINANCE` and a present embedder, because every later block depends on those two.

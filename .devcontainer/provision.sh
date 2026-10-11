@@ -143,7 +143,12 @@ text = set_kv(text, "LLM_MODEL", "xai.grok-4.3")
 text = set_kv(text, "OPENAI_API_KEY", "")
 text = set_kv(text, "LLM_FALLBACK_MODEL", "")
 
-for key in ("OCI_GENAI_API_KEY", "OCI_GENAI_ENDPOINT", "TAVILY_API_KEY"):
+# Primary (Phoenix) keys 1-6, Chicago fallback endpoint/keys 1-6, optional backup model and cooldown.
+secret_keys = ["OCI_GENAI_API_KEY", "OCI_GENAI_ENDPOINT", "TAVILY_API_KEY", "OCI_GENAI_FALLBACK_ENDPOINT",
+               "OCI_GENAI_FALLBACK_API_KEY", "OCI_GENAI_BACKUP_MODEL", "OCI_GENAI_FALLBACK_COOLDOWN_S"]
+secret_keys += [f"OCI_GENAI_API_KEY_{i}" for i in range(2, 7)]
+secret_keys += [f"OCI_GENAI_FALLBACK_API_KEY_{i}" for i in range(2, 7)]
+for key in secret_keys:
     if os.environ.get(key):
         text = set_kv(text, key, os.environ[key])
 

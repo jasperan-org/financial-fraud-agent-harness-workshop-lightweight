@@ -92,19 +92,20 @@ def _models(conn):
     return embedder
 
 
-def _llm(provider, rotator):
-    keys = len(rotator) if rotator else int(bool(os.environ.get("OPENAI_API_KEY")))
-    _line("chat LLM", keys, f"{provider}/{os.environ.get('LLM_MODEL')}, {keys} key(s)",
+def _llm(provider, router):
+    lanes = len(router.lanes) if router else int(bool(os.environ.get("OPENAI_API_KEY")))
+    unit = "lane(s)" if router else "key(s)"
+    _line("chat LLM", lanes, f"{provider}/{os.environ.get('LLM_MODEL')}, {lanes} {unit} ready",
           "add OCI_GENAI_API_KEY as a Codespaces secret and restart, or enter it when the credentials cell asks")
 
 
-def run_preflight(conn, provider, rotator=None):
+def run_preflight(conn, provider, router=None):
     """Print one readiness line per section. Raises if FINANCE is not seeded or the embedder is missing."""
     _environment()
     _agent_schema(conn)
     missing, txns = _finance(conn)
     embedder = _models(conn)
-    _llm(provider, rotator)
+    _llm(provider, router)
     if missing or not txns:
         raise RuntimeError("FINANCE is not seeded. Fix: " + SEED_FIX)
     if not embedder:

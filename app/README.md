@@ -20,7 +20,7 @@ You'll learn:
 - Why the harness should "guide the goal, not the path" (system prompt + tool schemas + budget — let the model choose).
 - How to keep state integrity out of the model's hands while still letting it author SQL, run sandboxed JS, and write to a scratchpad.
 - How tool-output offloading + truncation markers (`...[+N bytes; full: fetch_tool_output(tool_call_id='...')]`) keep context windows manageable across long threads.
-- How to structure a tool-call loop so the LLM can transparently fall back across providers mid-turn (OCI → OpenAI gpt-5.5 if OCI auth fails — see `agent/llm.py`).
+- How to structure a tool-call loop so the LLM can transparently fall back across regions and models mid-turn (Grok Phoenix → Grok Chicago → gpt-oss-120b on rate limits — see `agent/llm.py`).
 
 ### 2. Identity-aware authorization (the "Use As:" selector)
 
@@ -185,12 +185,15 @@ You'll learn how to make an agent's reasoning auditable by showing exactly what 
 
 ### 11. Provider routing and graceful degradation
 
-`agent/llm.py` is an `LlmRouter` that:
+`agent/llm.py` builds the shared `ModelRouter` from `oci_key_rotation.py` (also used by the notebook). It walks an ordered chain of lanes:
 
-- Tries OCI GenAI first when `LLM_PROVIDER=oci` and credentials are present.
-- Auto-normalizes OCI credentials at boot — appends `/openai/v1` to a bare endpoint, splits multi-key strings on `" and "` / `,` / `;`, takes the first key. The startup banner prints `[llm]   note: …` lines whenever it had to clean a value.
-- Falls back to OpenAI `gpt-5.5` (or whatever `LLM_FALLBACK_MODEL` points at) on `AuthenticationError`, `NotFoundError`, `APIConnectionError`, `APITimeoutError`. Once the fallback fires it sticks for the rest of the session.
-- Returns the same `client.chat.completions.create(...)` shape, so call sites don't change.
+1. `grok-phx` — `LLM_MODEL` (default `xai.grok-4.3`) on `OCI_GENAI_ENDPOINT`, keys `OCI_GENAI_API_KEY` … `_6`.
+2. `grok-chi` — same model on `OCI_GENAI_FALLBACK_ENDPOINT`, keys `OCI_GENAI_FALLBACK_API_KEY` … `_6`.
+3. `gptoss-chi` — `OCI_GENAI_BACKUP_MODEL` (default `openai.gpt-oss-120b`) on the Chicago endpoint.
+
+Lanes whose env is missing are skipped (no fallback env = Phoenix only). Grok limits are per tenancy per region, so on a rate limit (429) the lane is put on cooldown (`OCI_GENAI_FALLBACK_COOLDOWN_S`, default 120 s) and the next lane serves the call immediately; after the cooldown the next call tries Grok in Phoenix again. Auth errors (401/403) rotate keys inside the lane, transient errors get one retry then the next lane, and other errors (400…) raise at once. If every lane is limited, the last lane is retried with backoff rather than locking the user out.
+
+Switches are silent: the token meter always shows the primary model. Each event is appended as a JSON line to `OCI_GENAI_ROUTER_LOG` (default `~/.cache/fraud-workshop/llm-router.log`) and printed as one `[llm-router] …` line on the server console. The OAMP memory-extraction LLM shares the same router instance, so there is one cooldown state per process. `config.py` still normalizes the endpoint (`/openai/v1`) and splits multi-key strings.
 
 You'll learn how to ship an agent that doesn't go dark when a provider has a bad day, and how to make `.env` parse-resilient so a typo doesn't take down the harness.
 
@@ -240,7 +243,7 @@ python-oracledb (thin)
 - A running Oracle Free container (the app expects `oracle-free` on `localhost:1521/FREEPDB1`; override via `ORACLE_DSN` if different)
 - Python 3.11+
 - Node.js 18+
-- OCI GenAI credentials (`OCI_GENAI_API_KEY`); an OpenAI key is only an optional fallback
+- OCI GenAI credentials (`OCI_GENAI_API_KEY`); optional Chicago fallback keys (`OCI_GENAI_FALLBACK_API_KEY`)
 
 The app no longer requires the notebook to have been run — `scripts/bootstrap.py` handles every prerequisite that the notebook used to set up.
 

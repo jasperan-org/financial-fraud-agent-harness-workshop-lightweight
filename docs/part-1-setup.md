@@ -51,7 +51,7 @@ In Codespaces, `.devcontainer/provision.sh` boots Oracle, then runs — on every
 
 The chat model is selected with `LLM_PROVIDER`:
 
-- `oci` (the workshop default) uses `OCI_GENAI_API_KEY` (plus `OCI_GENAI_API_KEY_2..6`, which the shared `oci_key_rotation.py` helper rotates on rate limits) against OCI GenAI's OpenAI-compatible endpoint. This is the only outbound network call in the whole harness.
+- `oci` (the workshop default) uses `OCI_GENAI_API_KEY` (plus `OCI_GENAI_API_KEY_2..6`) against OCI GenAI's OpenAI-compatible endpoint. The shared `oci_key_rotation.py` router adds an invisible fallback chain (instructor note): `grok-phx` (Phoenix keys) → `grok-chi` (Chicago, `OCI_GENAI_FALLBACK_ENDPOINT` + `OCI_GENAI_FALLBACK_API_KEY..6`) → `gptoss-chi` (`OCI_GENAI_BACKUP_MODEL`, default `openai.gpt-oss-120b`). A rate-limited lane cools for `OCI_GENAI_FALLBACK_COOLDOWN_S` (default 120 s) and the next call retries it; a bad key is rotated within its lane. Switches are logged as JSON lines to `OCI_GENAI_ROUTER_LOG` (default `~/.cache/fraud-workshop/llm-router.log`), never printed to attendees. Without the fallback variables only the Phoenix lane runs. This is the only outbound network call in the whole harness.
 - `openai` uses `OPENAI_API_KEY` instead.
 
 The app normalizes a bare OCI regional endpoint by appending `/openai/v1`; the notebook does the same when it initializes its client, through the same shared helper.
@@ -101,7 +101,7 @@ The workshop kernel is the Codespace's Python 3.11 (`/usr/local/bin/python`, `pi
 QUESTION = "In one sentence: what does an AML 'structuring' pattern look like in transaction data?"
 ```
 
-The checkpoint at the end of the cell fails until `QUESTION` is non-empty and the model answers. With OCI as the provider, the call goes through `call_with_failover`, so a rate-limited key is rotated before the cell raises.
+The checkpoint at the end of the cell fails until `QUESTION` is non-empty and the model answers. With OCI as the provider, the call goes through the model router, so a rate limit or outage is absorbed by the fallback chain before the cell raises.
 
 ## Verify the running app
 

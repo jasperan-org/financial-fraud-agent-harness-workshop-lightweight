@@ -2,6 +2,7 @@
 and §3.x DSN setup, but reads from .env / process env instead of getpass prompts."""
 
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -28,13 +29,14 @@ ONNX_EMBED_MODEL = os.environ.get("ONNX_EMBED_MODEL", "ALL_MINILM_L12_V2")
 ONNX_EMBED_DIM = int(os.environ.get("ONNX_EMBED_DIM", "384"))
 
 # LLM
-# Defaults: OCI / xai.grok-4.3 (the workshop's primary). If OPENAI_API_KEY is
-# also set, the LlmRouter in agent/llm.py will keep `gpt-5.5` (or whatever
-# LLM_FALLBACK_MODEL is) as a transparent fallback — it kicks in only if the
-# OCI primary errors out (auth, 404, network).
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "oci").strip().lower()  # "openai" | "oci"
+# Lanes (agent/llm.py -> shared ModelRouter in oci_key_rotation.py):
+#   grok-phx -> grok-chi -> gptoss-chi. Lanes with missing env are skipped.
 LLM_MODEL = os.environ.get("LLM_MODEL", "xai.grok-4.3").strip()
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+
+# oci_key_rotation.py lives at the workshop repo root (shared with the notebook).
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if os.path.exists(os.path.join(_ROOT, "oci_key_rotation.py")) and _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 
 # ----- OCI credential normalization ----------------------------------------
@@ -82,22 +84,30 @@ def _normalize_api_key(raw: str) -> str:
 
 
 OCI_GENAI_API_KEY_RAW = os.environ.get("OCI_GENAI_API_KEY", "")
-OCI_GENAI_API_KEY = _normalize_api_key(OCI_GENAI_API_KEY_RAW)
-
 OCI_GENAI_ENDPOINT_RAW = os.environ.get(
     "OCI_GENAI_ENDPOINT",
-    "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/openai/v1",
+    "https://inference.generativeai.us-phoenix-1.oci.oraclecloud.com/openai/v1",
 )
 OCI_GENAI_ENDPOINT = _normalize_oci_endpoint(OCI_GENAI_ENDPOINT_RAW)
 
-# Capture whether the .env had to be cleaned, so build_llm_client can warn.
-OCI_API_KEY_WAS_CLEANED = bool(OCI_GENAI_API_KEY_RAW) and (OCI_GENAI_API_KEY != OCI_GENAI_API_KEY_RAW.strip())
+# Write cleaned values back so the shared router (load_lanes reads os.environ)
+# sees them. Fallback (Chicago) endpoint is normalized the same way.
+os.environ["OCI_GENAI_ENDPOINT"] = OCI_GENAI_ENDPOINT
+for _name in ["OCI_GENAI_API_KEY", "OCI_GENAI_API_KEY_2", "OCI_GENAI_API_KEY_3",
+              "OCI_GENAI_API_KEY_4", "OCI_GENAI_API_KEY_5", "OCI_GENAI_API_KEY_6",
+              "OCI_GENAI_FALLBACK_API_KEY", "OCI_GENAI_FALLBACK_API_KEY_2",
+              "OCI_GENAI_FALLBACK_API_KEY_3", "OCI_GENAI_FALLBACK_API_KEY_4",
+              "OCI_GENAI_FALLBACK_API_KEY_5", "OCI_GENAI_FALLBACK_API_KEY_6"]:
+    if os.environ.get(_name):
+        os.environ[_name] = _normalize_api_key(os.environ[_name])
+if os.environ.get("OCI_GENAI_FALLBACK_ENDPOINT"):
+    os.environ["OCI_GENAI_FALLBACK_ENDPOINT"] = _normalize_oci_endpoint(
+        os.environ["OCI_GENAI_FALLBACK_ENDPOINT"])
+
+# Capture whether the .env had to be cleaned, so build_llm_client can note it.
+_k1 = os.environ.get("OCI_GENAI_API_KEY", "")
+OCI_API_KEY_WAS_CLEANED = bool(OCI_GENAI_API_KEY_RAW) and (_k1 != OCI_GENAI_API_KEY_RAW.strip())
 OCI_ENDPOINT_WAS_CLEANED = bool(OCI_GENAI_ENDPOINT_RAW) and (OCI_GENAI_ENDPOINT != OCI_GENAI_ENDPOINT_RAW.strip().rstrip("/"))
-
-
-# Fallback model used when OCI is missing or rejects auth at runtime. The
-# user explicitly asked for gpt-5.5 here (env-overridable).
-LLM_FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL", "gpt-5.5").strip()
 
 # Tavily — gives the agent real-time web/news access. When the key is unset
 # the search_tavily tool returns a friendly error instead of crashing.

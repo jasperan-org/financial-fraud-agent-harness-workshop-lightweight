@@ -1,10 +1,10 @@
-from oci_key_rotation import make_rotating_oamp_llm
+from oci_key_rotation import make_router_oamp_llm
 from oracleagentmemory.core import OracleAgentMemory, MemoryExtractionConfig
 from oracleagentmemory.core.embedders import OracleDBEmbedder
 from oracleagentmemory.core.llms import Llm
 
 ONNX_EMBED_MODEL = "ALL_MINILM_L12_V2"
-extraction_llm = (make_rotating_oamp_llm(LLM_MODEL, OCI_ENDPOINT, OCI_ROTATOR)
+extraction_llm = (make_router_oamp_llm(OCI_ROUTER)
                   if LLM_PROVIDER == "oci" else Llm(LLM_MODEL))
 
 memory_client = OracleAgentMemory(
