@@ -4,6 +4,8 @@
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jasperan-org/financial-fraud-agent-harness-workshop-lightweight)
 
+**Dataset on Hugging Face:** every table the workshop produces (bank world, AML knowledge, agent memories, triage runs) is published with embeddings as [OracleDevs/financial-fraud-workshop-minilm](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-minilm) (384-d) and [OracleDevs/financial-fraud-workshop-bge-m3](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-bge-m3) (1024-d).
+
 ![Meridian Bank AML agent — high-level architecture](images/architecture-excalidraw.png)
 
 `Agent = Model + Harness`. The model emits tokens; everything else — memory, retrieval, tool dispatch, identity, budgets — is harness code. This workshop builds that harness twice: from primitives in the notebook, and as a running product in [`app/`](app/).
@@ -124,6 +126,7 @@ Then start the app in two terminals: `cd app/backend && python app.py` (→ :800
 - **[Oracle AI Developer Hub](https://github.com/oracle-devrel/oracle-ai-developer-hub)** — more samples and technical assets.
 - **[`oracle/skills`](https://github.com/oracle/skills)** — the skill library that seeds the skillbox.
 - **[`docs/part-1-setup.md`](docs/part-1-setup.md)** — what the Codespace provisions, and how to run the same four setup scripts against your own Oracle 26ai.
+- **[Financial Fraud Workshop dataset on Hugging Face](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-minilm)** — this workshop's data with embeddings, ready to load into Oracle AI Vector Search ([bge-m3 variant](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-bge-m3)).
 
 ## Maintainers: regenerating the notebooks
 
