@@ -4,6 +4,8 @@
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jasperan-org/financial-fraud-agent-harness-workshop-lightweight)
 
+> **In a live session? Join first, then open the Codespace.** Enter your GitHub username at **[workshopwaitingroom.com](https://workshopwaitingroom.com)**, accept the invitation GitHub sends you (email, or [the repository's invitations page](https://github.com/jasperan-org/financial-fraud-agent-harness-workshop-lightweight/invitations)), and only then create your Codespace. Collaborators' Codespaces receive the workshop's OCI Generative AI keys automatically; without write access GitHub does not pass them in. You are also invited to keep collaborating after the session: see [Collaborate](#collaborate).
+
 **Dataset on Hugging Face:** every table the workshop produces (bank world, AML knowledge, agent memories, triage runs) is published with embeddings as [OracleDevs/financial-fraud-workshop-minilm](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-minilm) (384-d) and [OracleDevs/financial-fraud-workshop-bge-m3](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-bge-m3) (1024-d).
 
 ![Meridian Bank AML agent — high-level architecture](images/architecture-excalidraw.png)
@@ -69,10 +71,12 @@ The running app carries that capstone as a live instrument: the **Autonomous** t
 
 **In Codespaces (nothing to install):**
 
-1. Click **Open in GitHub Codespaces** above, then **Create Codespace**. First build ≈ 5–8 minutes: Oracle Free plus the ONNX models (~117 MB).
-2. Wait for the post-create step to finish — it installs dependencies, boots Oracle, and provisions the database.
-3. Add `OCI_GENAI_API_KEY` as a **Codespaces secret** (restart the Codespace after adding it). The notebook reads it from the kernel environment (rotating bad keys across `OCI_GENAI_API_KEY` + `OCI_GENAI_API_KEY_2..6` and, instructor-side, falling back to the Chicago keys `OCI_GENAI_FALLBACK_ENDPOINT` + `OCI_GENAI_FALLBACK_API_KEY..6` and then `openai.gpt-oss-120b` when Grok is rate-limited; switches are silent and logged to `~/.cache/fraud-workshop/llm-router.log`), or prompts for it in §1.1; `provision.sh` copies the secret into `app/.env` for the app.
-4. Open [`notebook_student.ipynb`](notebook_student.ipynb) with the **Python 3.11** kernel and run from the top. The app is already on port **3000**, the backend on **8000**.
+1. Join: enter your GitHub username at [workshopwaitingroom.com](https://workshopwaitingroom.com), then accept the invitation (email, or [the invitations page](https://github.com/jasperan-org/financial-fraud-agent-harness-workshop-lightweight/invitations)). Collaborators get the shared OCI GenAI keys as repository Codespaces secrets; nothing to paste.
+2. Click **Open in GitHub Codespaces** above, then **Create Codespace**. First build ≈ 5–8 minutes: Oracle Free plus the ONNX models (~117 MB). Created the Codespace before accepting the invitation? Stop and restart it (or create a new one): secrets are injected only when a Codespace starts.
+3. Wait for the post-create step to finish — it installs dependencies, boots Oracle, and provisions the database. `provision.sh` copies the keys into `app/.env` for the app.
+4. Open [`notebook_student.ipynb`](notebook_student.ipynb) with the **Python 3.11** kernel and run from the top. The §1.2 preflight shows *chat LLM … lane(s) ready* when the keys arrived. The app is already on port **3000**, the backend on **8000**.
+
+Not a collaborator? Add your own `OCI_GENAI_API_KEY` as a personal Codespaces secret for this repository (then restart the Codespace), or paste it when §1.1 asks. Behind the scenes the notebook rotates bad keys across `OCI_GENAI_API_KEY` + `OCI_GENAI_API_KEY_2..6` and falls back to the Chicago keys (`OCI_GENAI_FALLBACK_ENDPOINT` + `OCI_GENAI_FALLBACK_API_KEY..6`), then `openai.gpt-oss-120b`, when Grok is rate-limited; switches are silent and logged to `~/.cache/fraud-workshop/llm-router.log`.
 
 **Provisioning is automatic and idempotent, on every open.** `.devcontainer/provision.sh` probes the database for each layer — `AGENT` schema + ONNX embedder, the `FINANCE` seed + duality views + skillbox, the Oracle Text index, the identity policies — and runs only the `app/scripts/*.py` step that is missing. A warm Codespace is a handful of `SELECT`s; a Codespace whose volume was recreated, whose container was stopped, or whose seed died half-way heals itself with no rebuild and no restart. There is no DDL to run by hand.
 
@@ -128,6 +132,16 @@ Then start the app in two terminals: `cd app/backend && python app.py` (→ :800
 - **[`docs/part-1-setup.md`](docs/part-1-setup.md)** — what the Codespace provisions, and how to run the same four setup scripts against your own Oracle 26ai.
 - **[Financial Fraud Workshop dataset on Hugging Face](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-minilm)** — this workshop's data with embeddings, ready to load into Oracle AI Vector Search ([bge-m3 variant](https://huggingface.co/datasets/OracleDevs/financial-fraud-workshop-bge-m3)).
 
+## Collaborate
+
+This repository is a working, open harness: memory (OAMP), retrieval, toolbox, skillbox, tool-output offload, identity and autonomous triage in one agent. Attendees join as collaborators through [workshopwaitingroom.com](https://workshopwaitingroom.com), and the invitation stays useful after the session.
+
+- **Report** a bug, a confusing step or an idea in [Issues](https://github.com/jasperan-org/financial-fraud-agent-harness-workshop-lightweight/issues).
+- **Change** something on a branch and open a pull request against `main`; `main` only changes through reviewed pull requests.
+- Good first contributions: a new tool for the toolbox, a new skill for the skillbox, another AML flag rule in the seed, a clearer explanation in `docs/`.
+
+How to work on each part (notebooks, app, provisioning) and what to check before a pull request: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Maintainers: regenerating the notebooks
 
 Never edit the `.ipynb` files. Both are generated from `.nbwork/parts/<part>/NNNN-*.{md,py,student.md,student.py,figure.json}`.
@@ -136,7 +150,7 @@ Never edit the `.ipynb` files. Both are generated from `.nbwork/parts/<part>/NNN
 python3 .nbwork/sync_figures.py           # refresh figure cells from figures_new/*/manifest.json (--check to preview)
 python3 .nbwork/nbparts.py assemble       # write notebook_complete.ipynb and notebook_student.ipynb
 python3 .nbwork/nbparts.py assemble EXECUTED.ipynb   # same, taking code-cell outputs from an executed copy
-python3 scripts/check_notebooks.py        # validate the pair: parse, 9 TODOs, checkpoints, no drift, no secrets
+python3 scripts/check_notebooks.py        # validate the pair: parse, 8 TODOs, checkpoints, no drift, no secrets
 ```
 
 Edit the part files, run `sync_figures.py` after changing a figure manifest or SVG, then assemble and validate. Execute `notebook_complete.ipynb` against a live database and LLM to refresh its outputs.

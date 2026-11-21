@@ -125,9 +125,14 @@ docker logs oracle-free 2>&1 | tail -20
 
 **Symptom:** A cell fails because `os.environ.get(...)` returns `None`.
 
-**Cause:** The Codespaces secret was added after this Codespace was created, so it wasn't injected at startup. (Secrets are only injected at creation time.)
+**Cause:** No key reached this Codespace. GitHub copies the workshop's repository Codespaces secrets only into Codespaces of users with **write access**, and only when the Codespace starts. Either you are not a collaborator yet (invitation not sent or not accepted), or you accepted it after this Codespace started.
 
-**Fix:** Set the key manually for this session only:
+**Fix:**
+
+1. Enter your GitHub username at [workshopwaitingroom.com](https://workshopwaitingroom.com) and accept the invitation (email, or the repository's [invitations page](https://github.com/jasperan-org/financial-fraud-agent-harness-workshop-lightweight/invitations)).
+2. Stop and restart the Codespace (Command Palette → *Codespaces: Stop Current Codespace*, then reopen it from <https://github.com/codespaces>), or create a new one. Re-run the notebook from §1.1.
+
+To keep going in this session meanwhile, set a key by hand:
 
 ```python
 import os
@@ -135,7 +140,7 @@ os.environ["OPENAI_API_KEY"] = "sk-..."     # or
 os.environ["OCI_GENAI_API_KEY"] = "..."
 ```
 
-Do not commit this to git. For permanent fixes, stop the Codespace, add the secret in repo settings, and create a new one.
+Do not commit this to git.
 
 ---
 
@@ -187,7 +192,7 @@ Reload the VS Code window (`Cmd/Ctrl + Shift + P` → `Developer: Reload Window`
 
 - *FINANCE tables / transactions / SAR reports* → the seed did not finish: `cd app && python scripts/bootstrap.py && python scripts/seed.py`.
 - *ONNX embedder missing* → `cd app && python scripts/bootstrap.py` (needs the `vector_memory_size` pool from the same script).
-- *chat LLM: 0 lane(s)* → no OCI GenAI key reached the kernel's environment; add it as a Codespaces secret (then restart), or re-run §1.1 and paste the key at its prompt. (`app/.env` feeds the app, not the notebook kernel.)
+- *chat LLM: 0 lane(s)* → no OCI GenAI key reached the kernel's environment: join as a collaborator at [workshopwaitingroom.com](https://workshopwaitingroom.com), accept the invitation, restart the Codespace; or re-run §1.1 and paste a key at its prompt. (`app/.env` feeds the app, not the notebook kernel.)
 - *Oracle Text index absent* → informational: §3.1 creates it before the keyword leg needs it.
 
 The cell hard-fails only on a seeded `FINANCE` and a present embedder, because every later block depends on those two.

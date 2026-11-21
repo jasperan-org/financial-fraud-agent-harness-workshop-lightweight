@@ -96,7 +96,8 @@ def _llm(provider, router):
     lanes = len(router.lanes) if router else int(bool(os.environ.get("OPENAI_API_KEY")))
     unit = "lane(s)" if router else "key(s)"
     _line("chat LLM", lanes, f"{provider}/{os.environ.get('LLM_MODEL')}, {lanes} {unit} ready",
-          "add OCI_GENAI_API_KEY as a Codespaces secret and restart, or enter it when the credentials cell asks")
+          "join at workshopwaitingroom.com, accept the GitHub invitation and restart the Codespace, "
+          "or enter a key when the credentials cell asks")
 
 
 def run_preflight(conn, provider, router=None):

@@ -37,7 +37,10 @@ echo "============================================"
 if [ -z "${OCI_GENAI_API_KEY:-}" ] && ! grep -q "^OCI_GENAI_API_KEY=..*" "$WORKSPACE/app/.env" 2>/dev/null; then
   echo ""
   echo "  ⚠️  No OCI GenAI key (OCI_GENAI_API_KEY) in the environment or app/.env."
-  echo "      Setup continues; the chat loop needs the key. To add it later:"
+  echo "      Setup continues; the chat loop needs the key."
+  echo "      Workshop attendees: join at https://workshopwaitingroom.com, accept the GitHub"
+  echo "      invitation, then restart this Codespace; collaborators receive the keys automatically."
+  echo "      Or add your own key:"
   echo "        echo 'OCI_GENAI_API_KEY=...' >> $WORKSPACE/app/.env"
   echo "        bash .devcontainer/start_app.sh"
 fi

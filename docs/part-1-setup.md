@@ -83,7 +83,9 @@ The `connect` helper retries because a Docker healthcheck can pass before Oracle
 
 The connection cell is followed by a **preflight**: a dozen fast queries against the same catalogs the scanner will read, plus the LLM credentials. It reports FINANCE's tables and the AML rows in the seed, the in-database ONNX embedder and reranker, the OAMP memory table, the Oracle Text index, `toolbox` / `skillbox`, and the API keys.
 
-Each ❌ row prints the command that fixes it (`cd app && python scripts/bootstrap.py && python scripts/seed.py` for a missing seed, the Codespaces-secret instructions for a missing key). Only two failures stop the notebook — no `FINANCE`, no embedder — because everything from Part 2 on depends on those. If the preflight is green, the rest of the workshop has what it needs.
+Each ❌ row prints the command that fixes it (`cd app && python scripts/bootstrap.py && python scripts/seed.py` for a missing seed, the join-and-restart steps for a missing key). Only two failures stop the notebook — no `FINANCE`, no embedder — because everything from Part 2 on depends on those. If the preflight is green, the rest of the workshop has what it needs.
+
+**Where the keys come from.** The OCI GenAI keys are repository Codespaces secrets. GitHub injects them only into Codespaces of collaborators (write access), and only when the Codespace starts. In a live session, enter your GitHub username at [workshopwaitingroom.com](https://workshopwaitingroom.com), accept the invitation, then create (or restart) the Codespace. Without collaborator access, add your own `OCI_GENAI_API_KEY` as a personal Codespaces secret or paste it at the §1.1 prompt.
 
 If you want to see *how* Oracle was provisioned, read `app/scripts/bootstrap.py`, `seed.py`, `setup_advanced.py`, and `setup_deep_security.py` — the Codespace runs exactly those four, in that order, whenever a layer is missing (`.devcontainer/provision.sh`; whatever is already in place is left alone). `seed.py` itself is not idempotent — it drops and recreates `FINANCE`, including its policies — which is why `setup_deep_security.py` always runs after it.
 
